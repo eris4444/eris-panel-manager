@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eris Panel Manager — Sign in</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+  <div class="aurora"></div>
+  <main class="login-card">
+    <div class="brand">
+      <div class="brand-mark">ERIS</div>
+      <div class="brand-sub">PANEL&nbsp;MANAGER</div>
+    </div>
+    <form id="login-form" autocomplete="off">
+      <label>Username
+        <input name="user" type="text" required autocomplete="username" value="admin">
+      </label>
+      <label>Password
+        <input name="pass" type="password" required autocomplete="current-password" autofocus>
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      <p id="err" class="err" hidden></p>
+    </form>
+    <footer class="login-foot">panels · nodes · certs · backup · migrate · tunnels</footer>
+  </main>
+<script>
+const f = document.getElementById('login-form');
+const err = document.getElementById('err');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  const btn = f.querySelector('button');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user: f.user.value, pass: f.pass.value})
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) { location.href = '/'; return; }
+    err.textContent = j.error || 'Sign in failed'; err.hidden = false;
+  } catch (_) {
+    err.textContent = 'Network error'; err.hidden = false;
+  }
+  btn.disabled = false; btn.textContent = 'Sign in';
+});
+</script>
+</body>
+</html>

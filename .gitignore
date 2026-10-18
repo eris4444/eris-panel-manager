@@ -1,0 +1,11 @@
+# python
+__pycache__/
+*.pyc
+
+# local runtime / secrets (never commit)
+config.env
+*.bak
+tls/
+backups/
+state/
+*.log

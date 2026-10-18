@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eris Panel Manager</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="aurora"></div>
+
+<header class="topbar">
+  <div class="brand-row">
+    <span class="logo">ERIS</span>
+    <span class="logo-sub">PANEL MANAGER</span>
+  </div>
+  <div class="server-chip">
+    <span class="dot dot-live"></span>
+    <span id="server-ip">—</span>
+    <span class="muted" id="server-ver"></span>
+  </div>
+  <a class="btn btn-ghost" href="/api/logout">Logout</a>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="install">Install</button>
+  <button class="tab" data-tab="certs">Certificates</button>
+  <button class="tab" data-tab="backups">Backups</button>
+  <button class="tab" data-tab="migrate">Migrate</button>
+  <button class="tab" data-tab="tunnels">Tunnels</button>
+</nav>
+
+<main class="wrap">
+
+  <!-- DASHBOARD -->
+  <section class="panel active" data-panel="dashboard">
+    <div class="section-head">
+      <h2>Overview</h2>
+      <button class="btn btn-ghost" id="refresh">↻ Refresh</button>
+    </div>
+    <div class="grid" id="status-grid"></div>
+  </section>
+
+  <!-- INSTALL -->
+  <section class="panel" data-panel="install">
+    <h2>Panels</h2>
+    <div class="grid">
+      <div class="card"><h3>PasarGuard</h3><p class="muted">Xray panel (Marzban fork)</p>
+        <button class="btn btn-primary" data-run='{"action":"install-panel","args":{"key":"pasarguard"}}'>Install</button></div>
+      <div class="card"><h3>Marzban</h3><p class="muted">Gozargah Marzban</p>
+        <button class="btn btn-primary" data-run='{"action":"install-panel","args":{"key":"marzban"}}'>Install</button></div>
+      <div class="card"><h3>Marzneshin</h3><p class="muted">Next-gen Marzban</p>
+        <button class="btn btn-primary" data-run='{"action":"install-panel","args":{"key":"marzneshin"}}'>Install</button></div>
+      <div class="card"><h3>3x-ui <span class="muted">(Sanaei)</span></h3><p class="muted">MHSanaei 3x-ui</p>
+        <button class="btn btn-primary" data-run='{"action":"install-panel","args":{"key":"3x-ui"}}'>Install</button></div>
+    </div>
+    <h2>Nodes</h2>
+    <div class="grid">
+      <div class="card"><h3>PasarGuard node</h3>
+        <button class="btn" data-run='{"action":"install-node","args":{"key":"pasarguard-node"}}'>Install node</button></div>
+      <div class="card"><h3>Marzban node</h3>
+        <button class="btn" data-run='{"action":"install-node","args":{"key":"marzban-node"}}'>Install node</button></div>
+      <div class="card"><h3>Marzneshin node</h3>
+        <button class="btn" data-run='{"action":"install-node","args":{"key":"marzneshin-node"}}'>Install node</button></div>
+    </div>
+  </section>
+
+  <!-- CERTS -->
+  <section class="panel" data-panel="certs">
+    <h2>Issue an SSL certificate</h2>
+    <form id="cert-form" class="form">
+      <label>Domain<input name="domain" placeholder="panel.example.com" required></label>
+      <label>Email (ACME account)<input name="email" placeholder="you@example.com" type="email"></label>
+      <label>Validation method
+        <select name="method">
+          <option value="standalone">standalone — needs port 80 free</option>
+          <option value="nginx">nginx — auto-edit nginx</option>
+          <option value="webroot">webroot</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit">Issue certificate</button>
+      <button class="btn btn-ghost" type="button" id="cert-list-btn">List certificates</button>
+    </form>
+    <p class="hint">Point the domain's A/AAAA record to this server first. Renewal is automatic (acme.sh cron).</p>
+  </section>
+
+  <!-- BACKUPS -->
+  <section class="panel" data-panel="backups">
+    <div class="section-head"><h2>Backups</h2>
+      <div>
+        <button class="btn" data-run='{"action":"backup","args":{"key":"ALL"}}' id="backup-all">Backup every panel</button>
+      </div>
+    </div>
+    <div class="chips">
+      <button class="chip" data-run='{"action":"backup","args":{"key":"pasarguard"}}'>+ PasarGuard</button>
+      <button class="chip" data-run='{"action":"backup","args":{"key":"marzban"}}'>+ Marzban</button>
+      <button class="chip" data-run='{"action":"backup","args":{"key":"marzneshin"}}'>+ Marzneshin</button>
+      <button class="chip" data-run='{"action":"backup","args":{"key":"3x-ui"}}'>+ 3x-ui</button>
+    </div>
+    <table class="tbl" id="backup-tbl">
+      <thead><tr><th>Archive</th><th>Size</th><th>When</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- MIGRATE -->
+  <section class="panel" data-panel="migrate">
+    <h2>Migrate to a new server</h2>
+    <p class="hint">This server is the <b>source</b>. Panels are copied to the destination you enter (backup → transfer → install → restore).</p>
+    <form id="migrate-form" class="form">
+      <div class="row">
+        <label>Destination (user@host)<input name="to" placeholder="root@203.0.113.9" required></label>
+        <label>SSH port<input name="port" value="22"></label>
+      </div>
+      <label>SSH password <span class="muted">(leave blank to use your key)</span>
+        <input name="password" type="password" autocomplete="off"></label>
+      <label>What to migrate
+        <select name="panels">
+          <option value="ALL">Everything installed (all-at-once)</option>
+          <option value="pasarguard">PasarGuard only</option>
+          <option value="marzban">Marzban only</option>
+          <option value="marzneshin">Marzneshin only</option>
+          <option value="3x-ui">3x-ui only</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="dry_run" checked> Dry-run first (no changes)</label>
+      <button class="btn btn-primary" type="submit">Start migration</button>
+    </form>
+  </section>
+
+  <!-- TUNNELS -->
+  <section class="panel" data-panel="tunnels">
+    <h2>Tunnels</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Spoof Tunnel</h3>
+        <p class="muted">Core + built-in Spoof Tester + web GUI (ParsaKSH)</p>
+        <button class="btn btn-primary" data-run='{"action":"tunnel-install","args":{"what":"spoof"}}'>Install</button>
+      </div>
+      <div class="card">
+        <h3>Eris Tunnel 2</h3>
+        <p class="muted">Backhaul-based tunnel manager (eris4444)</p>
+        <button class="btn btn-primary" data-run='{"action":"tunnel-install","args":{"what":"eris-tunnel-2"}}'>Install</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- LIVE CONSOLE -->
+<aside class="console" id="console">
+  <div class="console-head">
+    <span><span class="dot dot-idle" id="run-dot"></span> Live console</span>
+    <div>
+      <button class="btn btn-ghost btn-sm" id="console-clear">clear</button>
+      <button class="btn btn-ghost btn-sm" id="console-toggle">hide</button>
+    </div>
+  </div>
+  <pre class="console-body" id="console-body"></pre>
+</aside>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
