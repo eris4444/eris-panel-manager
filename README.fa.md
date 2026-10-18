@@ -10,7 +10,7 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 [🇬🇧 English](README.md)
 
-![version](https://img.shields.io/badge/version-1.0.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.1.0-5fd7ff?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
 
 <img src="docs/web-install.jpg" alt="Eris Panel Manager" width="85%">
@@ -36,9 +36,10 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 | بخش | چی به‌دست میاری |
 |---|---|
+| **تشخیص** | پنل/نود/تانل‌هایی که **بیرون از erispm** نصب شدن رو هم پیدا می‌کنه و وضعیت **واقعیِ روشن بودن** رو از کانتینرهای زنده‌ی داکر / `x‑ui` می‌خونه |
 | **نصب پنل** | PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) |
 | **نصب نود** | نود PasarGuard · نود Marzban · نود Marzneshin |
-| **سرتیفیکیت** | لتس‌اینکریپت/ZeroSSL با `acme.sh` — standalone، nginx یا webroot؛ تمدید خودکار |
+| **سرتیفیکیت** | لتس‌اینکریپت/ZeroSSL با `acme.sh` **یا ایمپورت سرت خودت**؛ اعمال خودکار داخل پوشه‌ای که خود پنل و داکرش می‌خونه + کانفیگ + ری‌استارت؛ تمدید و اعمال مجدد خودکار |
 | **بکاپ** | تکی یا همگانی؛ چک‌پوینت SQLite + دامپ MySQL/MariaDB؛ با چک‌سام SHA‑256 |
 | **بازیابی** | ریستور تأییدشده، آگاه به سرویس (stop/start)، ایمپورت مجدد SQL |
 | **حذف** | آن‌اینستال رسمی + پاک‌سازی اختیاری دیتا — همیشه اول یک بکاپ ایمنی می‌گیره |
@@ -92,6 +93,24 @@ erispm web passwd       # تغییر پسورد ادمین
 
 ---
 
+## سرتیفیکیت
+
+<img src="docs/web-certs.jpg" alt="certificates" width="85%">
+
+یا یک سرت جدید از [`acme.sh`](https://github.com/acmesh-official/acme.sh) بگیر (لتس‌اینکریپت/ZeroSSL، تمدید خودکار)
+**یا سرت و کلید خودت رو ایمپورت کن** — بعد erispm اون رو جایی می‌ذاره که پنل واقعاً بتونه ازش استفاده کنه.
+
+وقتی سرت رو روی یک پنل **اعمال** می‌کنی، erispm:
+1. اون رو در `/var/lib/<panel>/certs/<domain>/` کپی می‌کنه — پوشه‌ای که **با همون مسیر داخل کانتینر داکر پنل
+   مونت شده**، پس کانتینر می‌تونه بخونش (3x‑ui که بدون داکر اجرا می‌شه پوشه‌ی خودش رو می‌گیره)؛
+2. کانفیگ SSL پنل رو به اون اشاره می‌ده — `UVICORN_SSL_CERTFILE` / `UVICORN_SSL_KEYFILE` در `.env` مرزبان /
+   پاسارگارد / مرزنشین، یا `x-ui cert` برای 3x‑ui؛
+3. پنل رو ری‌استارت می‌کنه. موقع تمدید هم خودکار دوباره اعمال می‌شه.
+
+اگه فقط می‌خوای ذخیره بشه (`--apply none`، پیش‌فرض)، نسخه‌ی اصلی در `/etc/eris-panel-manager/certs/<domain>/` می‌مونه.
+
+---
+
 ## مرجع دستورات (CLI)
 
 هرکاری که منوها می‌کنن، یک ساب‌کامند ساده هم هست — مناسب اتوماسیون و خودِ پنل وب.
@@ -102,7 +121,10 @@ erispm install-node  <pasarguard-node|marzban-node|marzneshin-node>
 erispm delete-panel  <key> [--purge]
 erispm backup  <pasarguard|marzban|marzneshin|3x-ui> [outdir]
 erispm restore <key> <archive.tar.gz>
-erispm cert issue --domain panel.example.com --email you@example.com --method standalone
+erispm cert issue  --domain panel.example.com --email you@example.com --apply all|<key>
+erispm cert import --domain panel.example.com --cert-file F --key-file K --apply all|<key>
+erispm cert apply  --domain panel.example.com --panel all|<key>
+erispm cert sync <domain>        # اعمال مجدد بعد از تمدید
 erispm cert list
 erispm migrate --to root@NEW_IP --port 22 --panels ALL --dry-run
 erispm tunnel install <spoof|eris-tunnel-2>

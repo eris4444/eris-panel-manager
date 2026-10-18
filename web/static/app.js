@@ -169,10 +169,38 @@ function bindRunButtons(root=document){
 }
 
 /* ---------------- forms ---------------- */
+function fillApplySelects(){
+  $$('.apply-select').forEach(sel => {
+    const noAll = sel.classList.contains('apply-noall');
+    let html = '';
+    if (!noAll) html += '<option value="none">Save only — don\'t apply to a panel</option>';
+    html += '<option value="all">All installed panels</option>';
+    PANEL_KEYS.forEach(k => html += `<option value="${k}">${PRETTY[k]}</option>`);
+    sel.innerHTML = html;
+  });
+}
+fillApplySelects();
+
 $('#cert-form').addEventListener('submit', e => {
   e.preventDefault();
   const f = e.target;
-  runStream('cert-issue', {domain:f.domain.value.trim(), email:f.email.value.trim(), method:f.method.value});
+  runStream('cert-issue', {
+    domain:f.domain.value.trim(), email:f.email.value.trim(),
+    method:f.method.value, apply:f.apply.value
+  });
+});
+$('#cert-import-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = e.target;
+  runStream('cert-import', {
+    domain:f.domain.value.trim(), cert:f.cert.value, key:f.key.value, apply:f.apply.value
+  });
+});
+$('#cert-apply-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.domain.value.trim()) return;
+  runStream('cert-apply', {domain:f.domain.value.trim(), apply:f.apply.value});
 });
 $('#cert-list-btn').onclick = () => runStream('cert-list', {});
 

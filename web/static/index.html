@@ -68,21 +68,62 @@
 
   <!-- CERTS -->
   <section class="panel" data-panel="certs">
-    <h2>Issue an SSL certificate</h2>
-    <form id="cert-form" class="form">
-      <label>Domain<input name="domain" placeholder="panel.example.com" required></label>
-      <label>Email (ACME account)<input name="email" placeholder="you@example.com" type="email"></label>
-      <label>Validation method
-        <select name="method">
-          <option value="standalone">standalone — needs port 80 free</option>
-          <option value="nginx">nginx — auto-edit nginx</option>
-          <option value="webroot">webroot</option>
-        </select>
-      </label>
-      <button class="btn btn-primary" type="submit">Issue certificate</button>
+    <div class="section-head"><h2>SSL certificates</h2>
       <button class="btn btn-ghost" type="button" id="cert-list-btn">List certificates</button>
-    </form>
-    <p class="hint">Point the domain's A/AAAA record to this server first. Renewal is automatic (acme.sh cron).</p>
+    </div>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Get a new certificate</h3>
+        <p class="muted">Let's Encrypt / ZeroSSL via acme.sh, auto-renewing.</p>
+        <form id="cert-form" class="form">
+          <label>Domain<input name="domain" placeholder="panel.example.com" required></label>
+          <label>Email (ACME account)<input name="email" placeholder="you@example.com" type="email"></label>
+          <label>Validation method
+            <select name="method">
+              <option value="standalone">standalone — needs port 80 free</option>
+              <option value="nginx">nginx — auto-edit nginx</option>
+              <option value="webroot">webroot</option>
+            </select>
+          </label>
+          <label>Apply to panel
+            <select name="apply" class="apply-select"></select>
+          </label>
+          <button class="btn btn-primary" type="submit">Issue &amp; apply</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Import an existing certificate</h3>
+        <p class="muted">Paste your cert &amp; key — it's validated, stored and applied into the panel's own folder.</p>
+        <form id="cert-import-form" class="form">
+          <label>Domain<input name="domain" placeholder="panel.example.com" required></label>
+          <label>Certificate (fullchain, PEM)
+            <textarea name="cert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" required></textarea></label>
+          <label>Private key (PEM)
+            <textarea name="key" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" required></textarea></label>
+          <label>Apply to panel
+            <select name="apply" class="apply-select"></select>
+          </label>
+          <button class="btn btn-primary" type="submit">Import &amp; apply</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h3>Apply a stored certificate to a panel</h3>
+      <form id="cert-apply-form" class="form">
+        <div class="row">
+          <label>Domain<input name="domain" placeholder="panel.example.com" required></label>
+          <label>Panel<select name="apply" class="apply-select apply-noall"></select></label>
+        </div>
+        <button class="btn" type="submit">Apply now</button>
+      </form>
+    </div>
+
+    <p class="hint">Certificates are copied into a folder the panel &amp; its Docker container can read
+      (<code>/var/lib/&lt;panel&gt;/certs/&lt;domain&gt;/</code>), the panel's SSL config is pointed at them, and the
+      panel is restarted. Renewals re-apply automatically. Point the domain's A/AAAA record here first.</p>
   </section>
 
   <!-- BACKUPS -->

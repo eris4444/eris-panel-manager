@@ -3,6 +3,42 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-10-18
+
+### Fixed
+- **Critical:** `HOME` unbound under `set -u` (e.g. from the systemd web panel, cron or
+  bare `sudo`) aborted *every* command on startup — including `tunnel install`. `HOME` now
+  defaults to `/root` when unset.
+- Marzneshin paths corrected: its compose/`.env` live in `/etc/opt/marzneshin` (not
+  `/opt/marzneshin`). Detection, backup and purge updated accordingly; backups also keep the
+  marznode data dir.
+- Panel restarts no longer call the panels' own CLIs (`marzban restart`/`up` follow the logs
+  forever and don't re-read `.env`); erispm recreates the compose service instead.
+- PasarGuard backups never contained the SQL dump. Database dumps now read their credentials
+  from the DB container itself and also support **PostgreSQL / TimescaleDB**.
+- `erispm update` didn't refresh the web panel; it now updates the web files and the systemd
+  unit and restarts the panel (also available as `erispm web update`).
+- From the web panel, Eris Tunnel 2 installs headlessly (its installer needs `/dev/tty`), and
+  upstream `docker compose logs -f` no longer hangs a non-interactive run.
+
+### Added
+- **Smarter detection** — panels/nodes/tunnels installed *outside* erispm are now detected
+  (by data dir, compose dir, CLI and docker containers), and the real **running** state is
+  read from live Docker containers (these panels have no systemd unit of their own) and from
+  `x-ui` for 3x-ui. The dashboard shows running · installed/stopped · not-installed, and the
+  installers skip something that is already there unless you pass `--force`.
+- **Certificates that actually land in the panel** — issuing or importing a certificate can now
+  **auto-apply** it: the cert is copied into a folder the panel *and its Docker container* can
+  read (`/var/lib/<panel>/certs/<domain>/`, same path inside the container), the panel's SSL
+  config is pointed at it (`UVICORN_SSL_CERTFILE`/`KEYFILE` for Marzban/PasarGuard/Marzneshin,
+  `x-ui cert` for 3x-ui), and the panel is restarted and checked — if it doesn't come back
+  cleanly, the previous `.env` is restored. The folder is taken from the container's real
+  mounts, so non-standard installs work too. Renewals re-apply automatically.
+- **Manual certificate import** — paste or point at an existing cert + key; it is validated
+  (`openssl`, key-matches-cert), stored, and applied the same way.
+- New sub-commands: `cert apply`, `cert import`, `cert sync`; `cert issue --apply all|<key>`.
+- Web panel: Certificates tab rebuilt (issue / import / apply) with a panel-target picker.
+
 ## [1.0.0] — 2026-10-18
 
 Initial public release.
@@ -24,4 +60,5 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.1.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.1.0
 [1.0.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.0.0

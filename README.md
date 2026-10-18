@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.0.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.1.0-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -42,9 +42,10 @@ other.
 
 | Area | What you get |
 |---|---|
+| **Detect** | Finds panels/nodes/tunnels even if installed **outside erispm**, and shows the real **running** state from live Docker containers / `x‑ui` |
 | **Install panels** | PasarGuard · Marzban · Marzneshin · 3x‑ui (Sanaei) |
 | **Install nodes** | PasarGuard node · Marzban node · Marzneshin node |
-| **Certificates** | Let's Encrypt / ZeroSSL via `acme.sh` — standalone, nginx or webroot; auto‑renew |
+| **Certificates** | Let's Encrypt / ZeroSSL via `acme.sh`, **or import your own**; auto‑applied into the panel's own Docker‑readable folder + config + restart; auto‑renew & re‑apply |
 | **Backup** | Per‑panel or all‑at‑once; SQLite checkpoint + MySQL/MariaDB dump; SHA‑256 checksummed |
 | **Restore** | Verified restore, service‑aware stop/start, SQL re‑import |
 | **Delete** | Official uninstall + optional data purge — always takes a safety backup first |
@@ -132,7 +133,10 @@ erispm install-node  <pasarguard-node|marzban-node|marzneshin-node>
 erispm delete-panel  <key> [--purge]
 erispm backup  <pasarguard|marzban|marzneshin|3x-ui> [outdir]
 erispm restore <key> <archive.tar.gz>
-erispm cert issue --domain panel.example.com --email you@example.com --method standalone
+erispm cert issue  --domain panel.example.com --email you@example.com --apply all|<key>
+erispm cert import --domain panel.example.com --cert-file F --key-file K --apply all|<key>
+erispm cert apply  --domain panel.example.com --panel all|<key>
+erispm cert sync <domain>        # re-apply after a renewal
 erispm cert list
 erispm migrate --to root@NEW_IP --port 22 --panels ALL --dry-run
 erispm tunnel install <spoof|eris-tunnel-2>
@@ -170,14 +174,35 @@ After migrating, point your domain's DNS to the new server and re‑issue certif
 
 ## Certificates
 
-Powered by [`acme.sh`](https://github.com/acmesh-official/acme.sh) (Let's Encrypt / ZeroSSL, EC‑256,
-automatic renewal). Certificates are installed to `/etc/eris-panel-manager/certs/<domain>/` as
-`fullchain.pem` + `privkey.pem` — paste those two paths into your panel's SSL settings.
+<img src="docs/web-certs.jpg" alt="certificates tab" width="85%">
 
-Choose the validation method that fits:
-- **standalone** — needs port 80 free (erispm offers to pause nginx for you)
-- **nginx** — acme.sh edits your running nginx
-- **webroot** — serve the challenge from an existing web root
+Get a certificate from [`acme.sh`](https://github.com/acmesh-official/acme.sh) (Let's Encrypt /
+ZeroSSL, EC‑256, auto‑renewing) **or import one you already have** — then let erispm put it where the
+panel can actually use it.
+
+**Auto‑apply** is the point. When you apply a cert to a panel, erispm:
+1. copies it into `/var/lib/<panel>/certs/<domain>/` — a folder that is mounted into the panel's
+   **Docker container at the same path**, so the container can read it (3x‑ui, which runs natively,
+   gets its own readable folder);
+2. points the panel's SSL config at it — `UVICORN_SSL_CERTFILE` / `UVICORN_SSL_KEYFILE` in the
+   `.env` of Marzban / PasarGuard / Marzneshin, or `x-ui cert` for 3x‑ui;
+3. restarts the panel. Renewals re‑apply automatically.
+
+```bash
+# new cert, applied to one panel (or --apply all)
+erispm cert issue  --domain panel.example.com --email you@example.com --apply marzban
+
+# bring your own cert/key, validated then applied
+erispm cert import --domain panel.example.com --cert-file fullchain.pem --key-file privkey.pem --apply all
+
+# re-point a stored cert at a panel, or re-apply after a manual renew
+erispm cert apply  --domain panel.example.com --panel pasarguard
+erispm cert sync   panel.example.com
+```
+
+Or just save it (`--apply none`, the default) and the master copy stays in
+`/etc/eris-panel-manager/certs/<domain>/`. Validation methods: **standalone** (needs port 80 free —
+erispm offers to pause nginx), **nginx** (acme.sh edits your nginx), **webroot**.
 
 ---
 

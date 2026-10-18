@@ -70,6 +70,11 @@ for f in server.py static/index.html static/login.html static/app.css static/app
 done
 [ "$web_ok" = "1" ] && ok "web panel assets ready in $WEB_DIR"
 
+# an already-installed web panel picks up the new version (unit + restart)
+if [ -f /etc/systemd/system/eris-panel-web.service ]; then
+  "$DEST" web update >/dev/null 2>&1 && ok "running web panel updated and restarted"
+fi
+
 echo
 printf '  %s────────────────────────────────────────────%s\n' "$D" "$N"
 printf '  %srun the terminal menu:%s  %serispm%s\n' "$D" "$N" "$C" "$N"

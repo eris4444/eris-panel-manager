@@ -19,6 +19,7 @@ HERE      = os.path.dirname(os.path.abspath(__file__))
 STATIC    = os.path.join(HERE, "static")
 ERISPM    = "/usr/local/bin/erispm"
 BACKUP_DIR = "/etc/eris-panel-manager/backups"
+IMPORT_TMP = "/etc/eris-panel-manager/state/cert-import"
 
 PANELS = {"pasarguard", "marzban", "marzneshin", "3x-ui"}
 NODES  = {"pasarguard-node", "marzban-node", "marzneshin-node"}
@@ -203,34 +204,44 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(401, {"ok": False, "error": "invalid credentials"})
 
     # --- command building (strict allow-list) ---------------------------------
+    # Returns (cmd_list, extra_env, cleanup_paths) or (None, {}, []).
+    def _apply_ok(self, v):
+        if not v or v == "none":
+            return None
+        if v == "all":
+            return "all"
+        if all(x in PANELS for x in v.split(",")):
+            return v
+        return None
+
     def _build_cmd(self, action, args):
         a = args or {}
         if action == "install-panel":
             k = a.get("key")
             if k in PANELS:
-                return [ERISPM, "install-panel", k], {}
+                return [ERISPM, "install-panel", k] + (["--force"] if a.get("force") else []), {}, []
         if action == "install-node":
             k = a.get("key")
             if k in NODES:
-                return [ERISPM, "install-node", k], {}
+                return [ERISPM, "install-node", k] + (["--force"] if a.get("force") else []), {}, []
         if action == "delete-panel":
             k = a.get("key")
             if k in (PANELS | NODES):
                 cmd = [ERISPM, "delete-panel", k]
                 if a.get("purge"):
                     cmd.append("--purge")
-                return cmd, {}
+                return cmd, {}, []
         if action == "backup":
             k = a.get("key")
             if k in PANELS:
-                return [ERISPM, "backup", k], {}
+                return [ERISPM, "backup", k], {}, []
             if k == "ALL":
-                return [ERISPM, "backup", "pasarguard"], {}  # UI loops ALL itself
+                return [ERISPM, "backup", "pasarguard"], {}, []  # UI loops ALL itself
         if action == "restore":
             k = a.get("key")
             f = os.path.normpath(a.get("archive", ""))
             if k in PANELS and f.startswith(BACKUP_DIR) and os.path.isfile(f):
-                return [ERISPM, "restore", k, f], {}
+                return [ERISPM, "restore", k, f], {}, []
         if action == "cert-issue":
             d = a.get("domain", "")
             m = a.get("method", "standalone")
@@ -239,22 +250,56 @@ class Handler(BaseHTTPRequestHandler):
                 e = a.get("email", "")
                 if re.match(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$", e or ""):
                     cmd += ["--email", e]
-                return cmd, {}
+                ap = self._apply_ok(a.get("apply", ""))
+                if ap:
+                    cmd += ["--apply", ap]
+                return cmd, {}, []
+        if action == "cert-apply":
+            d = a.get("domain", "")
+            ap = self._apply_ok(a.get("apply", ""))
+            if re.match(r"^[A-Za-z0-9._-]+$", d) and ap:
+                return [ERISPM, "cert", "apply", "--domain", d, "--panel", ap], {}, []
+        if action == "cert-sync":
+            d = a.get("domain", "")
+            if re.match(r"^[A-Za-z0-9._-]+$", d):
+                return [ERISPM, "cert", "sync", d], {}, []
+        if action == "cert-import":
+            d = a.get("domain", "")
+            cert = a.get("cert", "")
+            key = a.get("key", "")
+            if not re.match(r"^[A-Za-z0-9._-]+$", d) or "BEGIN" not in cert or "BEGIN" not in key:
+                return None, {}, []
+            try:
+                os.makedirs(IMPORT_TMP, exist_ok=True)
+                os.chmod(IMPORT_TMP, 0o700)
+                cf = os.path.join(IMPORT_TMP, f"{d}.cert.pem")
+                kf = os.path.join(IMPORT_TMP, f"{d}.key.pem")
+                with open(os.open(cf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+                    fh.write(cert)
+                with open(os.open(kf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+                    fh.write(key)
+            except Exception:
+                return None, {}, []
+            cmd = [ERISPM, "cert", "import", "--domain", d, "--cert-file", cf, "--key-file", kf]
+            ap = self._apply_ok(a.get("apply", ""))
+            if ap:
+                cmd += ["--apply", ap]
+            return cmd, {}, [cf, kf]
         if action == "cert-list":
-            return [ERISPM, "cert", "list"], {}
+            return [ERISPM, "cert", "list"], {}, []
         if action == "tunnel-install":
             w = a.get("what")
             if w in TUNNELS:
-                return [ERISPM, "tunnel", "install", w], {}
+                return [ERISPM, "tunnel", "install", w], {}, []
         if action == "migrate":
             to = a.get("to", "")
             port = str(a.get("port", "22"))
             panels = a.get("panels", "")
             if not re.match(r"^[A-Za-z0-9._@-]+$", to) or not port.isdigit():
-                return None, {}
+                return None, {}, []
             ok_panels = panels == "ALL" or all(x in PANELS for x in panels.split(","))
             if not ok_panels:
-                return None, {}
+                return None, {}, []
             cmd = [ERISPM, "migrate", "--to", to, "--port", port, "--panels", panels]
             env = {}
             pw = a.get("password", "")
@@ -263,12 +308,13 @@ class Handler(BaseHTTPRequestHandler):
                 cmd += ["--password-env", "ERISPM_SSH_PASS"]
             if a.get("dry_run"):
                 cmd.append("--dry-run")
-            return cmd, env
-        return None, {}
+            return cmd, env, []
+        return None, {}, []
 
     # --- run & stream ---------------------------------------------------------
     def _base_env(self, extra):
         env = dict(os.environ)
+        env.setdefault("HOME", "/root")   # systemd services may start without HOME
         env["ERISPM_YES"] = "1"
         env["ERISPM_NONINTERACTIVE"] = "1"
         env["NO_COLOR"] = "1"
@@ -288,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_stream(self):
         body = self._read_body()
-        cmd, extra_env = self._build_cmd(body.get("action", ""), body.get("args", {}))
+        cmd, extra_env, cleanup = self._build_cmd(body.get("action", ""), body.get("args", {}))
         if not cmd:
             return self._json(400, {"error": "unknown or invalid action"})
         self.send_response(200)
@@ -326,6 +372,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         finally:
+            for pth in (cleanup or []):
+                try:
+                    os.remove(pth)
+                except Exception:
+                    pass
             try:
                 self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()

@@ -18,7 +18,13 @@
 # ==============================================================================
 set -u
 
-SCRIPT_VER="1.0.0"
+# HOME is referenced below (acme.sh lives under it). Under `set -u` an unset HOME
+# - as happens from some systemd/cron/sudo contexts - would abort the whole
+# script on startup, so give it a sane default before anything uses it.
+: "${HOME:=/root}"
+export HOME
+
+SCRIPT_VER="1.1.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -190,15 +196,17 @@ conf_set() { # conf_set KEY VALUE
 PANEL_KEYS="pasarguard marzban marzneshin 3x-ui"
 NODE_KEYS="pasarguard-node marzban-node marzneshin-node"
 
+# Detects a panel/node/tunnel even when it was installed OUTSIDE erispm, by
+# checking its real data dir, compose dir, CLI command and docker containers.
 is_installed() {
   case "$1" in
-    pasarguard)      [ -d /opt/pasarguard ] || have pasarguard ;;
-    marzban)         [ -d /opt/marzban ]    || have marzban ;;
-    marzneshin)      [ -d /opt/marzneshin ] || have marzneshin ;;
+    pasarguard)      [ -d /opt/pasarguard ] || [ -d /var/lib/pasarguard ] || have pasarguard ;;
+    marzban)         [ -d /opt/marzban ]    || [ -d /var/lib/marzban ]    || have marzban ;;
+    marzneshin)      [ -d /var/lib/marzneshin ] || [ -d /etc/opt/marzneshin ] || have marzneshin ;;
     3x-ui)           [ -d /etc/x-ui ] || [ -d /usr/local/x-ui ] || have x-ui ;;
-    pasarguard-node) [ -d /opt/pasarguard-node ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'pasarguard.*node' ;;
-    marzban-node)    [ -d /opt/marzban-node ]    || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marzban.*node' ;;
-    marzneshin-node) [ -d /opt/marzneshin-node ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marzneshin.*node' ;;
+    pasarguard-node) [ -d /var/lib/pg-node ] || [ -d /opt/pasarguard-node ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qiE 'pasarguard.*node|pg-node' ;;
+    marzban-node)    [ -d /var/lib/marzban-node ] || [ -d /opt/marzban-node ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marzban.*node' ;;
+    marzneshin-node) [ -d /var/lib/marznode ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marznode' ;;
     eris-tunnel-2)   [ -x /usr/local/bin/eristun2 ] ;;
     spoof-tunnel)    [ -d /opt/spoof-tunnel ] || have spoof-tunnel || systemctl list-unit-files 2>/dev/null | grep -qi spoof ;;
     *) return 1 ;;
@@ -206,6 +214,107 @@ is_installed() {
 }
 
 svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+
+# True when the thing is actually UP. The docker panels have no systemd unit of
+# their own name (they run via docker compose), so check live containers; 3x-ui
+# is a real systemd service.
+_dps() { docker ps --format '{{.Names}}' 2>/dev/null; }
+is_running() {
+  case "$1" in
+    marzban)         _dps | grep -i 'marzban'    | grep -qvi 'node' ;;
+    pasarguard)      _dps | grep -i 'pasarguard' | grep -qvi 'node' ;;
+    marzneshin)      _dps | grep -i 'marzneshin' | grep -qvi 'node' ;;
+    3x-ui)           svc_active x-ui ;;
+    marzban-node)    _dps | grep -qi 'marzban.*node' ;;
+    pasarguard-node) _dps | grep -qiE 'pasarguard.*node|pg-node' ;;
+    marzneshin-node) _dps | grep -qi 'marznode' ;;
+    eris-tunnel-2)   systemctl list-units --type=service 2>/dev/null | grep -qi 'eristun\|backhaul\|gost' ;;
+    spoof-tunnel)    _dps | grep -qi 'spoof' || systemctl is-active --quiet 'spoof-tunnel' 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
+# ---- panel metadata (where each panel keeps config the container can read) ----
+# appdir = where docker-compose.yml + .env live; datadir = volume mounted INTO
+# the container (so certs placed here are visible to the dockerised panel).
+panel_appdir() {
+  local def=""
+  case "$1" in
+    marzban)    def=/opt/marzban ;;
+    pasarguard) def=/opt/pasarguard ;;
+    marzneshin) def=/etc/opt/marzneshin ;;
+    *)          echo ""; return ;;
+  esac
+  if [ -f "$def/docker-compose.yml" ] || ! have docker; then echo "$def"; return; fi
+  # installed somewhere else by hand: docker compose records where it ran from
+  local wd
+  wd="$(docker ps -a --filter "label=com.docker.compose.service=$1" \
+          --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null | head -n1)"
+  echo "${wd:-$def}"
+}
+
+# "host_dir|container_dir" of the panel's data volume, read from the container's
+# REAL mounts - so a cert written to host_dir is guaranteed to be visible inside
+# the container at container_dir (they are equal on standard installs).
+panel_mount() { # key
+  local key="$1" def; def="$(panel_datadir "$key")"
+  if panel_dockerized "$key" && have docker; then
+    local cid m
+    cid="$(docker ps -aq --filter "label=com.docker.compose.service=$key" 2>/dev/null | head -n1)"
+    if [ -n "$cid" ]; then
+      m="$(docker inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$cid" 2>/dev/null \
+            | grep "|$def\$" | head -n1)"
+      [ -n "$m" ] && { echo "$m"; return; }
+    fi
+  fi
+  echo "$def|$def"
+}
+panel_datadir() {
+  case "$1" in
+    marzban)    echo /var/lib/marzban ;;
+    pasarguard) echo /var/lib/pasarguard ;;
+    marzneshin) echo /var/lib/marzneshin ;;
+    3x-ui)      echo /etc/x-ui ;;
+    *)          echo "" ;;
+  esac
+}
+panel_dockerized() { case "$1" in marzban|pasarguard|marzneshin) return 0 ;; *) return 1 ;; esac; }
+
+# Talk to a dockerised panel's compose project directly. The panels' own CLIs
+# (`marzban restart`, `marzban up`, ...) end by FOLLOWING the logs forever, which
+# would hang erispm, and a plain `restart` does not re-read .env - so recreate.
+panel_compose() { # key compose-args...
+  local key="$1"; shift
+  local dir; dir="$(panel_appdir "$key")"
+  [ -n "$dir" ] && [ -f "$dir/docker-compose.yml" ] || { warn "no docker-compose.yml in ${dir:-?}"; return 1; }
+  if docker compose version >/dev/null 2>&1; then
+    docker compose -p "$(basename "$dir")" --project-directory "$dir" -f "$dir/docker-compose.yml" "$@"
+  elif have docker-compose; then
+    docker-compose -p "$(basename "$dir")" --project-directory "$dir" -f "$dir/docker-compose.yml" "$@"
+  else
+    warn "docker compose is not available"; return 1
+  fi
+}
+panel_restart() { # recreate so a changed .env (e.g. SSL paths) is picked up
+  case "$1" in
+    marzban|pasarguard|marzneshin) panel_compose "$1" up -d --force-recreate --no-deps "$1" >/dev/null 2>&1 ;;
+    3x-ui) systemctl restart x-ui >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+panel_stop() {
+  case "$1" in
+    marzban|pasarguard|marzneshin) panel_compose "$1" down >/dev/null 2>&1 ;;
+    3x-ui) systemctl stop x-ui >/dev/null 2>&1 ;;
+  esac
+}
+panel_start() {
+  case "$1" in
+    marzban|pasarguard|marzneshin) panel_compose "$1" up -d >/dev/null 2>&1 ;;
+    3x-ui) systemctl start x-ui >/dev/null 2>&1 ;;
+  esac
+}
+XUI_BIN="/usr/local/x-ui/x-ui"   # the Go binary (the `x-ui` on PATH is only the menu script)
 
 pretty_name() {
   case "$1" in
@@ -236,13 +345,8 @@ status_line() { # status_line key
   local k="$1" dot name det=""
   name="$(pretty_name "$k")"
   if is_installed "$k"; then
-    dot="${G}●${N}"
-    case "$k" in
-      pasarguard|marzban|marzneshin) svc_active "$k" && det="${D}running${N}" || det="${Y}stopped${N}" ;;
-      3x-ui) svc_active x-ui && det="${D}running${N}" || det="${Y}stopped${N}" ;;
-      eris-tunnel-2) det="${D}installed${N}" ;;
-      *) det="${D}installed${N}" ;;
-    esac
+    if is_running "$k"; then dot="${G}●${N}"; det="${G}running${N}"
+    else                     dot="${Y}◐${N}"; det="${Y}installed · stopped${N}"; fi
   else
     dot="${D}○${N}"; det="${D}not installed${N}"
   fi
@@ -263,25 +367,74 @@ dashboard() {
 # ==============================================================================
 #  Run an upstream installer (wrapped)
 # ==============================================================================
+# Non-interactive runs (web panel): the upstream panel installers end with
+# `docker compose logs -f`, which never returns. A tiny `docker` shim placed first
+# on PATH drops -f/--follow that come AFTER the word `logs` (so `compose -f file`
+# is untouched) and shows the last lines instead.
+_make_logs_shim() { # -> echoes shim dir (empty if docker is absent)
+  local real; real="$(command -v docker 2>/dev/null)"; [ -n "$real" ] || return 0
+  local d; d="$(mktemp -d)" || return 0
+  cat >"$d/docker" <<SHIM
+#!/bin/sh
+n=\$#; seen=0; dropped=0
+for a do
+  if [ \$seen -eq 1 ] && { [ "\$a" = "-f" ] || [ "\$a" = "--follow" ]; }; then
+    dropped=1; set -- "\$@" "--tail=60"
+  else
+    set -- "\$@" "\$a"
+  fi
+  [ "\$a" = "logs" ] && seen=1
+done
+shift \$n
+exec "$real" "\$@"
+SHIM
+  chmod 755 "$d/docker"
+  printf '%s' "$d"
+}
+
 run_upstream() { # run_upstream URL [args...]
   local url="$1"; shift
   local tmp; tmp="$(mktemp)" || die "mktemp failed"
   info "fetching $(basename "$url")"
   curl -fsSL --retry 3 --max-time 120 -o "$tmp" "$url" || { rm -f "$tmp"; die "download failed: $url"; }
   sed -i 's/\r$//' "$tmp" 2>/dev/null || true
-  bash "$tmp" "$@"
-  local rc=$?
-  rm -f "$tmp"
+  local shim="" rc
+  [ "$NONINT" = "1" ] && shim="$(_make_logs_shim)"
+  if [ -n "$shim" ]; then
+    PATH="$shim:$PATH" bash "$tmp" "$@" </dev/null
+  else
+    bash "$tmp" "$@"
+  fi
+  rc=$?
+  rm -f "$tmp"; [ -n "$shim" ] && rm -rf "$shim"
   return $rc
 }
 
 # ==============================================================================
 #  PANEL / NODE INSTALL
 # ==============================================================================
+# Do not blindly re-run an installer over something that is already there
+# (installed by erispm or by hand). 0 = go ahead, 1 = skip.
+_install_guard() { # key
+  local key="$1" st
+  is_installed "$key" || return 0
+  if is_running "$key"; then st="installed and RUNNING"; else st="installed (stopped)"; fi
+  warn "$(pretty_name "$key") is already $st on this server"
+  if [ "${ERISPM_FORCE:-0}" = "1" ]; then info "--force given - running the official installer anyway"; return 0; fi
+  if [ "$NONINT" = "1" ]; then
+    info "skipped - nothing to do (add --force to reinstall/update through the official installer)"
+    return 1
+  fi
+  confirm "Run the official installer anyway (reinstall / update)?" n && return 0
+  info "kept the existing installation"
+  return 1
+}
+
 install_panel() { # install_panel <key>
   local key="$1"
   need_root
   ensure_pkg curl
+  _install_guard "$key" || return 0
   case "$key" in
     pasarguard)
       step "Installing PasarGuard panel"
@@ -317,6 +470,7 @@ install_node() { # install_node <key>
   local key="$1"
   need_root
   ensure_pkg curl
+  _install_guard "$key" || return 0
   ensure_docker
   case "$key" in
     pasarguard-node)
@@ -341,7 +495,7 @@ install_node() { # install_node <key>
 # ==============================================================================
 #  CERTIFICATES  (acme.sh wrapper - Let's Encrypt / ZeroSSL)
 # ==============================================================================
-ACME="$HOME/.acme.sh/acme.sh"
+ACME="${HOME:-/root}/.acme.sh/acme.sh"
 ensure_acme() {
   [ -x "$ACME" ] && return 0
   step "Installing acme.sh"
@@ -349,13 +503,124 @@ ensure_acme() {
   local email="$1"
   curl -fsSL https://get.acme.sh | sh -s email="${email:-admin@example.com}" >/dev/null 2>&1 \
     || die "acme.sh install failed"
-  ACME="$HOME/.acme.sh/acme.sh"
+  ACME="${HOME:-/root}/.acme.sh/acme.sh"
   "$ACME" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
   ok "acme.sh installed"
 }
 
-cert_issue() { # cert_issue domain email method(standalone|nginx|webroot) [webroot]
-  local domain="$1" email="$2" method="${3:-standalone}" webroot="${4:-/var/www/html}"
+# Set KEY="value" in a panel .env, replacing any existing (even commented) line.
+# spaced=1 -> `KEY = "value"` (Marzban/PasarGuard style); spaced=0 -> `KEY="value"`.
+_env_set() {
+  local f="$1" k="$2" v="$3" spaced="${4:-1}" tmp line
+  [ -f "$f" ] || { warn "env file not found: $f"; return 1; }
+  tmp="$(mktemp)"
+  grep -vE "^[#[:space:]]*${k}[[:space:]]*=" "$f" >"$tmp" 2>/dev/null || true
+  if [ "$spaced" = "1" ]; then line="${k} = \"${v}\""; else line="${k}=\"${v}\""; fi
+  printf '%s\n' "$line" >>"$tmp"
+  mv "$tmp" "$f"; chmod 600 "$f" 2>/dev/null || true
+}
+
+# Install a cert+key INTO a panel so its container/process can read it, set the
+# panel's config to point at it, and restart the panel.
+cert_apply_panel() { # key domain fullchain-src key-src
+  local key="$1" domain="$2" fc="$3" kf="$4"
+  is_installed "$key" || { warn "$(pretty_name "$key") is not installed - skipping"; return 1; }
+  local mnt hostd contd
+  mnt="$(panel_mount "$key")"; hostd="${mnt%%|*}"; contd="${mnt##*|}"
+  [ -n "$hostd" ] || { warn "unknown data dir for $key"; return 1; }
+  local hdir="$hostd/certs/$domain"   # where we write (host)
+  local cdir="$contd/certs/$domain"   # what the panel sees (inside its container)
+  mkdir -p "$hdir"
+  install -m 0644 "$fc" "$hdir/fullchain.pem" || { bad "copy failed"; return 1; }
+  install -m 0600 "$kf" "$hdir/privkey.pem"   || { bad "copy failed"; return 1; }
+  if [ "$hdir" = "$cdir" ]; then
+    ok "certificate placed in $hdir  (mounted into the panel at the same path)"
+  else
+    ok "certificate placed in $hdir  (seen inside the container as $cdir)"
+  fi
+  local envf="" envbak=""
+  if panel_dockerized "$key"; then
+    envf="$(panel_appdir "$key")/.env"
+    [ -f "$envf" ] || { bad "$envf not found - cannot point the panel at the certificate"; return 1; }
+    envbak="$envf.erispm-$(ts).bak"; cp -a "$envf" "$envbak"
+  fi
+  case "$key" in
+    marzban|pasarguard)
+      _env_set "$envf" UVICORN_SSL_CERTFILE "$cdir/fullchain.pem" 1
+      _env_set "$envf" UVICORN_SSL_KEYFILE  "$cdir/privkey.pem"  1
+      ok "pointed $(pretty_name "$key") at the new certificate in $envf" ;;
+    marzneshin)
+      _env_set "$envf" UVICORN_SSL_CERTFILE "$cdir/fullchain.pem" 0
+      _env_set "$envf" UVICORN_SSL_KEYFILE  "$cdir/privkey.pem"  0
+      ok "pointed Marzneshin at the new certificate in $envf" ;;
+    3x-ui)
+      if [ -x "$XUI_BIN" ] && "$XUI_BIN" cert -webCert "$cdir/fullchain.pem" -webCertKey "$cdir/privkey.pem" >/dev/null 2>&1; then
+        ok "applied via '$XUI_BIN cert'"
+      else
+        warn "set it in the x-ui panel → Security:  public=$cdir/fullchain.pem  key=$cdir/privkey.pem"
+      fi ;;
+  esac
+  info "restarting $(pretty_name "$key") to load the certificate"
+  panel_restart "$key" || warn "the restart command reported an error"
+  local healthy=1
+  if panel_dockerized "$key"; then
+    sleep 12; _panel_healthy "$key" || healthy=0
+  else
+    sleep 3; svc_active x-ui || healthy=0
+  fi
+  if [ $healthy -eq 1 ]; then
+    ok "$(pretty_name "$key") is up with the new certificate"
+  elif [ -n "$envbak" ]; then
+    bad "$(pretty_name "$key") did not come up cleanly - rolling back $envf"
+    cp -a "$envbak" "$envf"; panel_restart "$key"
+    warn "rolled back; check the certificate/key and the panel logs"
+    return 1
+  else
+    warn "$(pretty_name "$key") is not running - check it (systemctl status x-ui)"
+    return 1
+  fi
+}
+
+# App container of a compose panel is running and has not restarted since it
+# was (re)created - i.e. it is not crash-looping on a bad certificate.
+_panel_healthy() { # key
+  local cid st
+  cid="$(panel_compose "$1" ps -q "$1" 2>/dev/null | head -n1)"
+  [ -n "$cid" ] || return 1
+  st="$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$cid" 2>/dev/null)"
+  [ "${st%% *}" = "running" ] && [ "${st##* }" = "0" ]
+}
+
+# Apply the master copy of <domain>'s cert to one/many/all installed panels.
+cert_apply_to() { # domain fullchain key apply("all"|"k1,k2"|key)
+  local domain="$1" fc="$2" kf="$3" apply="$4" keys="" k applied=""
+  if [ "$apply" = "all" ]; then
+    for k in $PANEL_KEYS; do is_installed "$k" && keys="$keys $k"; done
+  else
+    keys="$(printf '%s' "$apply" | tr ',' ' ')"
+  fi
+  for k in $keys; do
+    cert_apply_panel "$k" "$domain" "$fc" "$kf" && applied="$applied,$k"
+  done
+  applied="${applied#,}"
+  if [ -n "$applied" ]; then
+    conf_set "certbind_$domain" "$applied"
+    ok "bound $domain → $applied (renewals re-apply automatically)"
+  fi
+}
+
+# Re-apply after a renewal (called by acme.sh reloadcmd).
+cert_sync() { # domain
+  local domain="$1" keys k
+  keys="$(conf_get "certbind_$domain" | tr ',' ' ')"
+  [ -n "$keys" ] || { info "no panels bound to $domain"; return 0; }
+  for k in $keys; do
+    cert_apply_panel "$k" "$domain" "$CERT_DIR/$domain/fullchain.pem" "$CERT_DIR/$domain/privkey.pem"
+  done
+}
+
+cert_issue() { # domain email method(standalone|nginx|webroot) [webroot] [apply]
+  local domain="$1" email="$2" method="${3:-standalone}" webroot="${4:-/var/www/html}" apply="${5:-}"
   need_root
   [ -n "$domain" ] || die "domain required"
   ensure_acme "$email"
@@ -375,48 +640,100 @@ cert_issue() { # cert_issue domain email method(standalone|nginx|webroot) [webro
   "$ACME" --install-cert -d "$domain" --ecc \
     --key-file       "$out/privkey.pem" \
     --fullchain-file "$out/fullchain.pem" \
-    --reloadcmd      "systemctl reload nginx 2>/dev/null || true"
+    --reloadcmd      "$SELF cert sync $domain >/dev/null 2>&1; systemctl reload nginx 2>/dev/null || true"
   ok "certificate saved:"
   printf '      %sfullchain:%s %s\n' "$D" "$N" "$out/fullchain.pem"
   printf '      %sprivate  :%s %s\n' "$D" "$N" "$out/privkey.pem"
   conf_set "cert_$domain" "$(date '+%F %T')"
-  info "paste these two paths into your panel's SSL settings; auto-renewal is handled by acme.sh cron"
+  if [ -n "$apply" ] && [ "$apply" != "none" ]; then
+    cert_apply_to "$domain" "$out/fullchain.pem" "$out/privkey.pem" "$apply"
+  else
+    info "auto-renewal is handled by acme.sh cron; apply it to a panel with:  erispm cert apply --domain $domain --panel <key>"
+  fi
+}
+
+# Import an EXISTING cert+key (manual), validate it, store it, optionally apply.
+cert_import() { # domain fullchain-file key-file [apply]
+  local domain="$1" fc="$2" kf="$3" apply="${4:-}"
+  need_root
+  [ -n "$domain" ] && [ -f "$fc" ] && [ -f "$kf" ] || die "need: domain + existing cert file + key file"
+  ensure_pkg openssl
+  step "Importing certificate for $domain"
+  openssl x509 -in "$fc" -noout >/dev/null 2>&1 || die "the certificate file is not valid PEM"
+  local cpk kpk
+  cpk="$(openssl x509 -in "$fc" -noout -pubkey 2>/dev/null)"
+  kpk="$(openssl pkey -in "$kf" -pubout 2>/dev/null)"
+  [ -n "$cpk" ] && [ "$cpk" = "$kpk" ] || die "the private key does not match the certificate"
+  ok "certificate and key match"
+  local out="$CERT_DIR/$domain"; mkdir -p "$out"
+  install -m 0644 "$fc" "$out/fullchain.pem"
+  install -m 0600 "$kf" "$out/privkey.pem"
+  ok "stored master copy in $out"
+  conf_set "cert_$domain" "$(date '+%F %T') (manual import)"
+  if [ -n "$apply" ] && [ "$apply" != "none" ]; then
+    cert_apply_to "$domain" "$out/fullchain.pem" "$out/privkey.pem" "$apply"
+  fi
 }
 
 cert_list() {
-  step "Issued certificates"
+  step "Certificates"
   if [ -x "$ACME" ]; then "$ACME" --list 2>/dev/null; fi
-  local d
+  local d dom bind
   for d in "$CERT_DIR"/*/; do
     [ -d "$d" ] || continue
-    printf '  %s·%s %s\n' "$C" "$N" "$(basename "$d")"
+    dom="$(basename "$d")"
+    bind="$(conf_get "certbind_$dom")"
+    printf '  %s·%s %-28s %s\n' "$C" "$N" "$dom" "${bind:+${D}→ $bind${N}}"
   done
 }
 
 # ==============================================================================
 #  BACKUP  &  RESTORE
 # ==============================================================================
-# Each panel: tar its config dir + data dir; dump SQL DB if containerised MySQL.
+# Each panel: tar its config dir + data dir; dump the DB if it runs in its own
+# container (MySQL / MariaDB / PostgreSQL / TimescaleDB).
 ts() { date '+%Y%m%d-%H%M%S'; }
 
-_dump_sql_if_any() { # _dump_sql_if_any <workdir> <stagedir>
-  local work="$1" stage="$2" dbc=""
-  [ -d "$work" ] || return 0
-  # find a mariadb/mysql container belonging to this compose project
-  dbc="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -Ei "$(basename "$work").*(db|mysql|maria)" | head -n1)"
-  [ -z "$dbc" ] && return 0
-  info "dumping SQL database from container $dbc"
-  local pw user
-  pw="$(grep -Ei 'MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD' "$work"/.env 2>/dev/null | head -n1 | cut -d= -f2-)"
-  user="root"
-  if docker exec "$dbc" sh -c 'command -v mariadb-dump' >/dev/null 2>&1; then
-    docker exec "$dbc" sh -c "mariadb-dump -u$user ${pw:+-p$pw} --all-databases" >"$stage/all-databases.sql" 2>/dev/null \
-      && ok "SQL dump captured" || warn "SQL dump failed (continuing with files only)"
+# "name|mysql" or "name|postgres" for the DB container of a compose project.
+_db_container() { # appdir
+  local proj; proj="$(basename "$1")"
+  have docker || return 0
+  docker ps --filter "label=com.docker.compose.project=$proj" --format '{{.Names}}|{{.Image}}' 2>/dev/null \
+    | while IFS='|' read -r n img; do
+        case "$img" in
+          *mariadb*|*mysql*)       printf '%s|mysql\n' "$n"; break ;;
+          *timescale*|*postgres*)  printf '%s|postgres\n' "$n"; break ;;
+        esac
+      done
+}
+
+# Credentials are read from the DB container's OWN environment, so they are
+# right whatever the panel's .env calls them (and never land on a command line).
+_dump_sql_if_any() { # appdir stagedir
+  local work="$1" stage="$2" hit name kind
+  hit="$(_db_container "$work")"; [ -n "$hit" ] || return 0
+  name="${hit%%|*}"; kind="${hit##*|}"
+  info "dumping the $kind database from container $name"
+  if [ "$kind" = "mysql" ]; then
+    local pw; pw="$(docker exec "$name" sh -c 'printf %s "${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"' 2>/dev/null)"
+    if docker exec -e MYSQL_PWD="$pw" "$name" sh -c \
+         'if command -v mariadb-dump >/dev/null 2>&1; then D=mariadb-dump; else D=mysqldump; fi; $D -uroot --all-databases --single-transaction --routines --events' \
+         >"$stage/all-databases.sql" 2>/dev/null && [ -s "$stage/all-databases.sql" ]; then
+      echo mysql >"$stage/db-type"; ok "SQL dump captured"
+    else
+      rm -f "$stage/all-databases.sql"; warn "SQL dump failed (continuing with files only)"
+    fi
   else
-    docker exec "$dbc" sh -c "mysqldump -u$user ${pw:+-p$pw} --all-databases" >"$stage/all-databases.sql" 2>/dev/null \
-      && ok "SQL dump captured" || warn "SQL dump failed (continuing with files only)"
+    local u; u="$(docker exec "$name" sh -c 'printf %s "${POSTGRES_USER:-postgres}"' 2>/dev/null)"
+    if docker exec "$name" pg_dumpall -U "${u:-postgres}" >"$stage/all-databases.sql" 2>/dev/null \
+         && [ -s "$stage/all-databases.sql" ]; then
+      echo postgres >"$stage/db-type"; ok "PostgreSQL dump captured"
+    else
+      rm -f "$stage/all-databases.sql"; warn "PostgreSQL dump failed (continuing with files only)"
+    fi
   fi
 }
+_stage_args() { [ -s "$1/all-databases.sql" ] && printf -- '-C %s all-databases.sql db-type' "$1"; }
 
 backup_panel() { # backup_panel <key> [outdir] -> prints archive path
   local key="$1" outdir="${2:-$BACKUP_DIR}"
@@ -432,19 +749,22 @@ backup_panel() { # backup_panel <key> [outdir] -> prints archive path
       tar -C / -czf "$arch" --ignore-failed-read \
           $( [ -d /opt/marzban ]     && echo opt/marzban ) \
           $( [ -d /var/lib/marzban ] && echo var/lib/marzban ) \
-          $( [ -s "$stage/all-databases.sql" ] && echo -C "$stage" all-databases.sql ) 2>/dev/null ;;
+          $(_stage_args "$stage") 2>/dev/null ;;
     marzneshin)
       [ -d /var/lib/marzneshin ] && { sqlite3 /var/lib/marzneshin/db.sqlite3 'PRAGMA wal_checkpoint(TRUNCATE);' 2>/dev/null || true; }
-      _dump_sql_if_any /opt/marzneshin "$stage"
+      _dump_sql_if_any /etc/opt/marzneshin "$stage"
       tar -C / -czf "$arch" --ignore-failed-read \
-          $( [ -d /opt/marzneshin ]     && echo opt/marzneshin ) \
-          $( [ -d /var/lib/marzneshin ] && echo var/lib/marzneshin ) 2>/dev/null ;;
+          $( [ -d /etc/opt/marzneshin ] && echo etc/opt/marzneshin ) \
+          $( [ -d /var/lib/marzneshin ] && echo var/lib/marzneshin ) \
+          $( [ -d /var/lib/marznode ]   && echo var/lib/marznode ) \
+          $(_stage_args "$stage") 2>/dev/null ;;
     pasarguard)
       [ -d /var/lib/pasarguard ] && { sqlite3 /var/lib/pasarguard/db.sqlite3 'PRAGMA wal_checkpoint(TRUNCATE);' 2>/dev/null || true; }
       _dump_sql_if_any /opt/pasarguard "$stage"
       tar -C / -czf "$arch" --ignore-failed-read \
           $( [ -d /opt/pasarguard ]     && echo opt/pasarguard ) \
-          $( [ -d /var/lib/pasarguard ] && echo var/lib/pasarguard ) 2>/dev/null ;;
+          $( [ -d /var/lib/pasarguard ] && echo var/lib/pasarguard ) \
+          $(_stage_args "$stage") 2>/dev/null ;;
     3x-ui)
       tar -C / -czf "$arch" --ignore-failed-read \
           $( [ -d /etc/x-ui ]       && echo etc/x-ui ) \
@@ -471,13 +791,8 @@ restore_panel() { # restore_panel <key> <archive>
     (cd "$(dirname "$arch")" && sha256sum -c "$(basename "$arch").sha256" >/dev/null 2>&1) \
       && ok "checksum verified" || warn "checksum missing/failed - continuing"
   fi
-  # stop services so files are not held open
-  case "$key" in
-    marzban)    have marzban    && marzban down    >/dev/null 2>&1 || true ;;
-    marzneshin) have marzneshin && marzneshin down >/dev/null 2>&1 || true ;;
-    pasarguard) have pasarguard && pasarguard down >/dev/null 2>&1 || true ;;
-    3x-ui)      systemctl stop x-ui 2>/dev/null || true ;;
-  esac
+  # stop the stack so files are not held open
+  panel_stop "$key" || true
   local tmp; tmp="$(mktemp -d)"
   tar -xzf "$arch" -C "$tmp" || { rm -rf "$tmp"; die "extract failed"; }
   # copy directories back into place
@@ -486,31 +801,29 @@ restore_panel() { # restore_panel <key> <archive>
       mkdir -p "/$(dirname "$d")"
       cp -a "$d" "/$(dirname "$d")/"
     done ) 2>/dev/null
-  # if a SQL dump is present, load it into the (freshly started) db container
+  # if a database dump is present, start the stack and load it into the DB container
   if [ -s "$tmp/all-databases.sql" ]; then
-    info "SQL dump present - bringing panel up, then importing"
-    case "$key" in
-      marzban)    marzban up    -d >/dev/null 2>&1 || true ;;
-      marzneshin) marzneshin up -d >/dev/null 2>&1 || true ;;
-      pasarguard) pasarguard up -d >/dev/null 2>&1 || true ;;
-    esac
-    sleep 8
-    local dbc pw
-    dbc="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -Ei "$key.*(db|mysql|maria)" | head -n1)"
-    pw="$(grep -Ei 'MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD' /opt/$key/.env 2>/dev/null | head -n1 | cut -d= -f2-)"
-    if [ -n "$dbc" ]; then
-      docker exec -i "$dbc" sh -c "mariadb -uroot ${pw:+-p$pw} 2>/dev/null || mysql -uroot ${pw:+-p$pw}" <"$tmp/all-databases.sql" \
-        && ok "SQL imported" || warn "SQL import failed - check DB credentials"
+    info "database dump present - starting the stack, then importing"
+    panel_start "$key" || true
+    sleep 10
+    local hit name kind
+    hit="$(_db_container "$(panel_appdir "$key")")"
+    name="${hit%%|*}"; kind="${hit##*|}"
+    if [ -z "$hit" ]; then
+      warn "no database container is running for $(pretty_name "$key") - dump left unimported"
+    elif [ "$kind" = "mysql" ]; then
+      local pw; pw="$(docker exec "$name" sh -c 'printf %s "${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"' 2>/dev/null)"
+      docker exec -i -e MYSQL_PWD="$pw" "$name" sh -c \
+        'if command -v mariadb >/dev/null 2>&1; then mariadb -uroot; else mysql -uroot; fi' <"$tmp/all-databases.sql" \
+        && ok "SQL imported" || warn "SQL import failed - check the database container"
+    else
+      local u; u="$(docker exec "$name" sh -c 'printf %s "${POSTGRES_USER:-postgres}"' 2>/dev/null)"
+      docker exec -i "$name" psql -q -U "${u:-postgres}" -d postgres <"$tmp/all-databases.sql" >/dev/null 2>&1 \
+        && ok "PostgreSQL imported" || warn "PostgreSQL import reported errors (existing roles/objects are expected)"
     fi
   fi
   rm -rf "$tmp"
-  # (re)start
-  case "$key" in
-    marzban)    have marzban    && marzban restart    >/dev/null 2>&1 || true ;;
-    marzneshin) have marzneshin && marzneshin restart >/dev/null 2>&1 || true ;;
-    pasarguard) have pasarguard && pasarguard restart >/dev/null 2>&1 || true ;;
-    3x-ui)      systemctl restart x-ui 2>/dev/null || true ;;
-  esac
+  panel_restart "$key" || panel_start "$key" || true
   ok "$(pretty_name "$key") restore finished"
 }
 
@@ -541,7 +854,7 @@ delete_panel() { # delete_panel <key> [--purge]
     case "$key" in
       pasarguard) rm -rf /opt/pasarguard /var/lib/pasarguard ;;
       marzban)    rm -rf /opt/marzban /var/lib/marzban ;;
-      marzneshin) rm -rf /opt/marzneshin /var/lib/marzneshin ;;
+      marzneshin) rm -rf /etc/opt/marzneshin /var/lib/marzneshin ;;
       3x-ui)      rm -rf /etc/x-ui /usr/local/x-ui ;;
     esac
   fi
@@ -632,9 +945,35 @@ tunnel_install() { # tunnel_install <spoof|spoof-tester|eris-tunnel-2>
       run_upstream "$URL_SPOOF" ;;
     eris-tunnel-2|eristun2)
       step "Installing Eris Tunnel 2"
-      run_upstream "$URL_ERISTUN2" ;;
+      if [ "$NONINT" = "1" ]; then
+        # Its installer finishes by opening the menu on /dev/tty, which does not
+        # exist under the web panel's systemd service - install the same way
+        # without launching the TUI.
+        _install_eristun2_headless
+      else
+        run_upstream "$URL_ERISTUN2"
+      fi ;;
     *) die "unknown tunnel: $what" ;;
   esac
+}
+
+_install_eristun2_headless() {
+  local raw="https://raw.githubusercontent.com/eris4444/eris-tunnel-2/main/eris-tunnel-2.sh"
+  local dest="/usr/local/bin/eristun2" base="/etc/eris-tunnel-2" tmp ver
+  tmp="$(mktemp)" || die "mktemp failed"
+  info "downloading Eris Tunnel 2 manager"
+  curl -fsSL --retry 3 --max-time 90 -o "$tmp" "$raw" || { rm -f "$tmp"; bad "download failed"; return 1; }
+  sed -i 's/\r$//' "$tmp" 2>/dev/null || true
+  grep -q 'ERIS-TUNNEL-2-SCRIPT' "$tmp" || { rm -f "$tmp"; bad "downloaded file is not Eris Tunnel 2"; return 1; }
+  bash -n "$tmp" 2>/dev/null       || { rm -f "$tmp"; bad "downloaded file has syntax errors"; return 1; }
+  ver="$(grep -m1 '^SCRIPT_VER=' "$tmp" | cut -d'"' -f2)"
+  mkdir -p "$base" && chmod 700 "$base"
+  [ -f "$dest" ] && cp -f "$dest" "$dest.bak" 2>/dev/null
+  install -m 0755 "$tmp" "$dest" || { rm -f "$tmp"; bad "could not write $dest"; return 1; }
+  echo "$raw" >"$base/update.url"
+  rm -f "$tmp"
+  ok "Eris Tunnel 2 v${ver:-?} installed to $dest"
+  info "it is an interactive manager - open it from an SSH terminal with:  eristun2"
 }
 
 # Quick local check: can this host emit spoofed source packets? (safe, temporary)
@@ -658,14 +997,55 @@ spoof_quickcheck() {
 #  WEB PANEL  (Python 3 standard library - no pip)
 # ==============================================================================
 WEB_PORT_DEFAULT="8787"
-web_fetch_assets() {
+web_fetch_assets() { # [force] - force re-downloads every file (used by updates)
+  local force="${1:-}" f tmp fail=0
   mkdir -p "$WEB_DIR/static"
-  local f
   for f in server.py static/index.html static/login.html static/app.css static/app.js; do
-    if [ ! -f "$WEB_DIR/$f" ]; then
-      curl -fsSL "$RAW_WEB_BASE/$f" -o "$WEB_DIR/$f" 2>/dev/null || true
+    [ -z "$force" ] && [ -f "$WEB_DIR/$f" ] && continue
+    tmp="$(mktemp)"
+    # download to a temp file first so a failed fetch never wipes a working file
+    if curl -fsSL --retry 3 --max-time 60 "$RAW_WEB_BASE/$f" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+      install -m 0644 "$tmp" "$WEB_DIR/$f"
+    else
+      fail=1
     fi
+    rm -f "$tmp"
   done
+  return $fail
+}
+
+web_write_unit() {
+  cat >/etc/systemd/system/eris-panel-web.service <<UNIT
+[Unit]
+Description=Eris Panel Manager - Web Panel
+After=network.target
+
+[Service]
+Type=simple
+Environment=ERISPM_CONF=$CONF
+Environment=HOME=/root
+ExecStart=/usr/bin/python3 $WEB_DIR/server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+}
+
+# Refresh the web panel in place (new assets + unit), keeping port/user/password.
+web_update() {
+  need_root
+  step "Updating the web panel"
+  web_fetch_assets force && ok "web assets refreshed" || warn "some web files could not be downloaded (kept the old ones)"
+  if [ -f /etc/systemd/system/eris-panel-web.service ]; then
+    web_write_unit
+    # --no-block: if this runs FROM the web panel, the restart must not cut our own output first
+    systemctl --no-block restart eris-panel-web.service >/dev/null 2>&1 && ok "web panel restarting with the new version"
+  else
+    info "web panel not installed yet - run: erispm web install"
+  fi
 }
 
 web_install() {
@@ -709,23 +1089,9 @@ web_install() {
   conf_set web_secret "$secret"
 
   # systemd unit
-  cat >/etc/systemd/system/eris-panel-web.service <<UNIT
-[Unit]
-Description=Eris Panel Manager - Web Panel
-After=network.target
-
-[Service]
-Type=simple
-Environment=ERISPM_CONF=$CONF
-ExecStart=/usr/bin/python3 $WEB_DIR/server.py
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  systemctl daemon-reload
+  web_write_unit
   systemctl enable --now eris-panel-web.service >/dev/null 2>&1
+  systemctl restart eris-panel-web.service >/dev/null 2>&1 || true
   sleep 1
   local scheme="http"; [ "$use_tls" = "y" ] && scheme="https"
   hr 56
@@ -774,9 +1140,12 @@ self_update() {
   sed -i 's/\r$//' "$tmp" 2>/dev/null || true
   grep -q "$MARKER" "$tmp" || { rm -f "$tmp"; die "downloaded file is not erispm"; }
   bash -n "$tmp" || { rm -f "$tmp"; die "downloaded file has syntax errors"; }
-  install -m 0755 "$tmp" "$SELF"; rm -f "$tmp"
-  web_fetch_assets 2>/dev/null || true
-  ok "updated to latest; web assets refreshed"
+  # bash reads a running script lazily, so never rewrite it in place: put the
+  # new copy next to it and rename (the running process keeps the old inode).
+  install -m 0755 "$tmp" "$SELF.new" && mv -f "$SELF.new" "$SELF"; rm -f "$tmp"
+  ok "erispm updated to v$(grep -m1 '^SCRIPT_VER=' "$SELF" | cut -d'"' -f2)"
+  # this process still holds the OLD functions - let the new copy do the web part
+  "$SELF" web update
 }
 
 # ==============================================================================
@@ -789,10 +1158,7 @@ json_status() {
     [ $first -eq 1 ] || printf ','; first=0
     local inst=false run=false
     is_installed "$k" && inst=true
-    case "$k" in
-      pasarguard|marzban|marzneshin) svc_active "$k" && run=true ;;
-      3x-ui) svc_active x-ui && run=true ;;
-    esac
+    is_running   "$k" && run=true
     printf '{"key":"%s","name":"%s","installed":%s,"running":%s}' \
       "$k" "$(pretty_name "$k")" "$inst" "$run"
   done
@@ -878,22 +1244,85 @@ menu_restore() {
 }
 
 menu_cert() { cert_menu; }
+
+_read_until_end() { local line; while IFS= read -r line </dev/tty; do [ "$line" = "END" ] && break; printf '%s\n' "$line"; done; }
+
+_pick_cert_target() { # echoes apply spec: none | all | <key>
+  local sel; sel="$(_pick 'Apply the certificate to which panel?' \
+    "none:Just save it, do not apply to a panel" \
+    "all:All installed panels" \
+    "marzban:Marzban" "pasarguard:PasarGuard" "marzneshin:Marzneshin" "3x-ui:3x-ui (Sanaei)")"
+  printf '%s' "${sel:-none}"
+}
+
 cert_menu() {
-  banner
-  step "SSL certificate (Let's Encrypt / ZeroSSL via acme.sh)"
-  local domain email method
-  domain="$(ask 'domain (e.g. panel.example.com)')"
-  [ -n "$domain" ] || { warn "cancelled"; return; }
+  while :; do
+    banner
+    local a; a="$(_pick 'SSL certificates' \
+      "issue:Get a NEW certificate (Let's Encrypt / ZeroSSL) + auto-apply" \
+      "import:Import an EXISTING certificate (paste or files) + apply" \
+      "apply:Apply a stored certificate to a panel" \
+      "list:List certificates & what they are applied to" \
+      "sync:Re-apply a certificate now (after a manual renew)")"
+    [ -z "$a" ] && return
+    case "$a" in
+      issue)  cert_menu_issue ;;
+      import) cert_menu_import ;;
+      apply)  cert_menu_apply ;;
+      list)   cert_list; pause ;;
+      sync)   local d; d="$(ask 'domain to re-apply')"; [ -n "$d" ] && cert_sync "$d"; pause ;;
+    esac
+  done
+}
+
+cert_menu_issue() {
+  banner; step "Get a new certificate"
+  local domain email method wr tgt
+  domain="$(ask 'domain (e.g. panel.example.com)')"; [ -n "$domain" ] || return
   email="$(ask 'email for the ACME account' "$(conf_get acme_email)")"
   [ -n "$email" ] && conf_set acme_email "$email"
   local m; m="$(_pick 'validation method' \
     "standalone:standalone (needs port 80 free)" \
     "nginx:nginx (auto-edits your nginx)" \
     "webroot:webroot (serve from a folder)")"
-  method="${m:-standalone}"
-  local wr="/var/www/html"
+  method="${m:-standalone}"; wr="/var/www/html"
   [ "$method" = "webroot" ] && wr="$(ask 'webroot path' "$wr")"
-  cert_issue "$domain" "$email" "$method" "$wr"
+  tgt="$(_pick_cert_target)"
+  cert_issue "$domain" "$email" "$method" "$wr" "$tgt"
+  pause
+}
+
+cert_menu_import() {
+  banner; step "Import an existing certificate"
+  local domain src tgt fc kf
+  domain="$(ask 'domain this certificate is for')"; [ -n "$domain" ] || return
+  src="$(_pick 'how will you provide it?' \
+    "file:I have the .pem files on disk" \
+    "paste:Paste the certificate and the key")"
+  [ -z "$src" ] && return
+  if [ "$src" = "file" ]; then
+    fc="$(ask 'path to fullchain/cert .pem')"
+    kf="$(ask 'path to private key .pem')"
+  else
+    local tmpd; tmpd="$(mktemp -d)"; fc="$tmpd/fullchain.pem"; kf="$tmpd/privkey.pem"
+    printf '  %s·%s paste the CERTIFICATE (with chain), then a line containing only  %sEND%s\n' "$C" "$N" "$Y" "$N"
+    _read_until_end >"$fc"
+    printf '  %s·%s paste the PRIVATE KEY, then a line containing only  %sEND%s\n' "$C" "$N" "$Y" "$N"
+    _read_until_end >"$kf"
+  fi
+  tgt="$(_pick_cert_target)"
+  cert_import "$domain" "$fc" "$kf" "$tgt"
+  pause
+}
+
+cert_menu_apply() {
+  banner; step "Apply a stored certificate"
+  local domain tgt
+  domain="$(ask 'domain of a stored certificate')"; [ -n "$domain" ] || return
+  [ -f "$CERT_DIR/$domain/fullchain.pem" ] || { bad "no stored certificate for $domain - issue or import it first"; pause; return; }
+  tgt="$(_pick_cert_target)"
+  [ "$tgt" = "none" ] && { warn "nothing to apply"; pause; return; }
+  cert_apply_to "$domain" "$CERT_DIR/$domain/fullchain.pem" "$CERT_DIR/$domain/privkey.pem" "$tgt"
   pause
 }
 
@@ -946,11 +1375,13 @@ menu_web() {
     printf '  %sWeb panel%s   %s\n' "$BOLD" "$N" "$(web_ctl url 2>/dev/null)"
     local k; k="$(_pick 'Web panel' \
       "install:Install / reconfigure the web panel" \
+      "update:Update the web panel (keeps port & password)" \
       "start:Start" "stop:Stop" "restart:Restart" "status:Status" \
       "passwd:Change admin password")"
     [ -z "$k" ] && return
     case "$k" in
       install) web_install ;;
+      update)  web_update ;;
       passwd)  web_passwd ;;
       *)       web_ctl "$k" ;;
     esac
@@ -962,8 +1393,9 @@ main_menu() {
   while :; do
     banner; dashboard
     local k; k="$(_pick 'Main menu' \
+      "status:Detect / refresh what is installed & running" \
       "install:Install panels & nodes" \
-      "cert:SSL certificates" \
+      "cert:SSL certificates (issue · import · apply)" \
       "backup:Backup databases" \
       "restore:Restore from backup" \
       "delete:Remove panels & nodes" \
@@ -972,6 +1404,7 @@ main_menu() {
       "web:Web panel" \
       "update:Update erispm")"
     case "$k" in
+      status)  banner; dashboard; pause ;;
       install) menu_install ;;
       cert)    menu_cert ;;
       backup)  menu_backup ;;
@@ -1001,24 +1434,28 @@ ${BOLD}Eris Panel Manager${N}  v$SCRIPT_VER
   ${C}erispm delete-panel${N}  <key> [--purge]
   ${C}erispm backup${N} <key> [outdir]    key: pasarguard|marzban|marzneshin|3x-ui
   ${C}erispm restore${N} <key> <archive>
-  ${C}erispm cert${N} issue --domain D [--email E] [--method standalone|nginx|webroot] [--webroot P]
-  ${C}erispm cert${N} list
+  ${C}erispm cert${N} issue  --domain D [--email E] [--method standalone|nginx|webroot] [--apply all|<key>]
+  ${C}erispm cert${N} import --domain D --cert-file F --key-file K [--apply all|<key>]
+  ${C}erispm cert${N} apply  --domain D --panel all|<key>
+  ${C}erispm cert${N} sync <domain>      (re-apply after a renewal)   ${C}erispm cert list${N}
   ${C}erispm migrate${N} --to user@host [--port 22] [--password-env VAR] --panels a,b,c|ALL [--dry-run]
   ${C}erispm tunnel install${N} <spoof|eris-tunnel-2>
-  ${C}erispm web${N} <install|start|stop|restart|status|url|passwd>
+  ${C}erispm web${N} <install|update|start|stop|restart|status|url|passwd>
   ${C}erispm status${N}                   human status    ${C}erispm status --json${N}   machine status
   ${C}erispm update${N}                   self-update
   ${C}erispm version${N}
 
-  Flags: ${D}-y/--yes${N} assume yes   ${D}NO_COLOR=1${N} disable colour   ${D}ERISPM_YES=1${N} non-interactive
+  Flags: ${D}-y/--yes${N} assume yes   ${D}--force${N} reinstall even if already installed
+         ${D}NO_COLOR=1${N} disable colour   ${D}ERISPM_YES=1${N} non-interactive
 USAGE
 }
 
-# parse global -y / --yes anywhere
+# parse global -y / --yes / --force anywhere
 ARGS=()
 for a in "$@"; do
   case "$a" in
     -y|--yes) ASSUME_YES=1 ;;
+    --force)  ERISPM_FORCE=1 ;;
     *) ARGS+=("$a") ;;
   esac
 done
@@ -1045,8 +1482,21 @@ case "$cmd" in
       issue)
         dom="$(getflag --domain "$@")"; em="$(getflag --email "$@")"
         meth="$(getflag --method "$@")"; wr="$(getflag --webroot "$@")"
-        cert_issue "$dom" "$em" "${meth:-standalone}" "${wr:-/var/www/html}" ;;
-      list) cert_list ;;
+        appl="$(getflag --apply "$@")"; pnl="$(getflag --panel "$@")"
+        [ -z "$appl" ] && appl="$pnl"
+        cert_issue "$dom" "$em" "${meth:-standalone}" "${wr:-/var/www/html}" "$appl" ;;
+      import)
+        dom="$(getflag --domain "$@")"; fcf="$(getflag --cert-file "$@")"
+        kff="$(getflag --key-file "$@")"; appl="$(getflag --apply "$@")"
+        pnl="$(getflag --panel "$@")"; [ -z "$appl" ] && appl="$pnl"
+        cert_import "$dom" "$fcf" "$kff" "$appl" ;;
+      apply)
+        dom="$(getflag --domain "$@")"; appl="$(getflag --panel "$@")"
+        [ -z "$appl" ] && appl="$(getflag --apply "$@")"
+        [ -n "$dom" ] && [ -n "$appl" ] || die "need --domain and --panel"
+        cert_apply_to "$dom" "$CERT_DIR/$dom/fullchain.pem" "$CERT_DIR/$dom/privkey.pem" "$appl" ;;
+      sync)  cert_sync "${1:-$(getflag --domain "$@")}" ;;
+      list)  cert_list ;;
       *) usage ;;
     esac ;;
   migrate)
@@ -1064,6 +1514,7 @@ case "$cmd" in
     sub="${1:-status}"; shift || true
     case "$sub" in
       install) web_install ;;
+      update)  web_update ;;
       passwd)  web_passwd ;;
       start|stop|restart|status|url) web_ctl "$sub" ;;
       *) usage ;;
