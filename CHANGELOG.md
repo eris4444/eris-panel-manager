@@ -3,6 +3,26 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-10-19
+
+### Added
+- **The original Spoof Tunnel panel inside the erispm web panel.** Once Spoof Tunnel is installed
+  (the official [ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel) installer, as
+  before), a **Spoof panel** tab shows its own panel — **unchanged**, same login, same pages,
+  Spoof Tester and live tunnel logs included. The web panel finds its port and secret web path by
+  itself (from `spoof-panel.service` and the panel's own SQLite settings) and serves it through a
+  same-origin reverse proxy, so it works on the erispm port and over erispm's HTTPS, and only after
+  signing in to erispm. HTTP, uploads/downloads and its WebSocket logs are passed through; the
+  erispm session cookie is never forwarded to it.
+- "Open Spoof panel" on the dashboard and on the Tunnels card, an "Open in new tab" link, and the
+  panel's direct address.
+
+### Changed
+- `erispm tunnel install spoof` no longer re-runs the official installer over an existing Spoof
+  panel: that installer picks a **new random port and adds another login** every time. The panel
+  is left exactly as it is; use `--force` (or confirm at the prompt in the menu) to reinstall anyway.
+- Spoof Tunnel running-state detection now checks the real `spoof-panel` service.
+
 ## [1.2.0] — 2026-10-18
 
 ### Added
@@ -93,6 +113,7 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.3.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.3.0
 [1.2.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.2.0
 [1.1.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.1.0
 [1.0.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.0.0

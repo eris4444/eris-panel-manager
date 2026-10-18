@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.2.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.3.0-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -50,7 +50,7 @@ other.
 | **Restore** | Verified restore, service‑aware stop/start, SQL re‑import |
 | **Delete** | Official uninstall + optional data purge — always takes a safety backup first |
 | **Migrate** | Source → new server, **one‑by‑one or all‑at‑once**, with a dry‑run first |
-| **Tunnels** | Spoof Tunnel (+ built‑in Spoof Tester + web GUI) · Eris Tunnel 2 |
+| **Tunnels** | Spoof Tunnel (+ built‑in Spoof Tester + its **original panel, embedded unchanged**) · Eris Tunnel 2 |
 | **Web panel** | Password login, **interactive in‑browser terminal** (answer installer prompts, open the full menu), status dashboard — Python 3 stdlib, no pip, no CDN |
 | **TUI** | Full‑screen coloured menu, works under any file name |
 
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.2.0
+   ███████╗██║  ██║██║███████║   v1.3.0
 
   Installed on this server
   ──────────────────────────────────────────
@@ -123,6 +123,7 @@ erispm web passwd       # change the admin password
 - **Open erispm menu** — the complete terminal menu, in the browser.
 - **Re‑attach** — reload the page or lose the connection and the running task comes back,
   with its recent output.
+- **Spoof panel tab** — the original Spoof Tunnel panel, unchanged, inside this panel (see *Tunnels*).
 
 > The web panel runs as `root` (it has to, to manage system services). Put it behind HTTPS,
 > pick a strong password, and only open its port to the addresses you trust.
@@ -230,6 +231,16 @@ panel, restores files, re‑imports SQL if present, and starts the panel back up
 |---|---|
 | **Spoof Tunnel** | Installs [ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel) — core + the **built‑in Spoof Tester** (find usable spoof IPs) + its web GUI |
 | **Eris Tunnel 2** | Installs [eris4444/eris-tunnel-2](https://github.com/eris4444/eris-tunnel-2) — a Backhaul‑based tunnel manager |
+
+**The Spoof panel inside erispm.** Spoof Tunnel is installed with its official installer and keeps
+its own panel (random port + secret web path + its own login). The erispm web panel then shows that
+**original panel, unchanged**, in a *Spoof panel* tab: it reads the port and web path from
+`spoof-panel.service` and the panel's settings, and serves it through a same‑origin reverse proxy —
+so it is reachable on the erispm port, over erispm's HTTPS, and only after you sign in to erispm.
+Sign in with the username/password the Spoof installer printed. Its direct address keeps working too.
+
+Running the installer again would give the Spoof panel a **new port and another login**, so
+`erispm tunnel install spoof` leaves an existing one untouched (`--force` reinstalls anyway).
 
 There is also a quick, temporary spoof‑capability check (`iptables` SNAT + `tcpdump`) in the
 Tunnels menu for a fast sanity test before you commit to a tunnel setup.

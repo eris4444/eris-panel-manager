@@ -29,6 +29,7 @@
   <button class="tab" data-tab="backups">Backups</button>
   <button class="tab" data-tab="migrate">Migrate</button>
   <button class="tab" data-tab="tunnels">Tunnels</button>
+  <button class="tab" data-tab="spoof" id="tab-spoof" hidden>Spoof panel</button>
 </nav>
 
 <main class="wrap">
@@ -182,7 +183,9 @@
       <div class="card">
         <h3>Spoof Tunnel</h3>
         <p class="muted">Core + built-in Spoof Tester + web GUI (ParsaKSH)</p>
-        <button class="btn btn-primary" data-run='{"action":"tunnel-install","args":{"what":"spoof"}}'>Install</button>
+        <p class="spoof-state" id="spoof-state"></p>
+        <button class="btn btn-primary" id="spoof-open" type="button" hidden>Open Spoof panel</button>
+        <button class="btn btn-primary" id="spoof-install" data-run='{"action":"tunnel-install","args":{"what":"spoof"}}'>Install</button>
       </div>
       <div class="card">
         <h3>Eris Tunnel 2</h3>
@@ -190,6 +193,21 @@
         <button class="btn btn-primary" data-run='{"action":"tunnel-install","args":{"what":"eris-tunnel-2"}}'>Install</button>
       </div>
     </div>
+  </section>
+
+  <!-- SPOOF PANEL: the official panel, shown here unchanged -->
+  <section class="panel" data-panel="spoof">
+    <div class="section-head">
+      <h2>Spoof Tunnel panel</h2>
+      <div class="head-actions">
+        <button class="btn btn-ghost" id="spoof-reload" type="button">↻ Reload</button>
+        <a class="btn btn-ghost" id="spoof-newtab" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+      </div>
+    </div>
+    <p class="hint">The original panel from <a href="https://github.com/ParsaKSH/spoof-tunnel" target="_blank" rel="noopener noreferrer">ParsaKSH/spoof-tunnel</a>,
+      unchanged, served through this panel. Sign in with the username and password its installer printed.
+      Direct address: <code id="spoof-direct">—</code></p>
+    <iframe class="spoof-frame" id="spoof-frame" title="Spoof Tunnel panel"></iframe>
   </section>
 
 </main>

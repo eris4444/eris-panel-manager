@@ -13,7 +13,7 @@
 #  License: MIT  (c) 2026 eris4444
 # ==============================================================================
 import os, sys, re, json, time, hmac, base64, hashlib, secrets, subprocess, ssl
-import select, signal, threading
+import select, signal, socket, threading, http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -41,6 +41,14 @@ REPLAY_MAX = 2 * 1024 * 1024   # bytes of task output kept for re-attaching
 CHUNK_MAX  = 256 * 1024        # largest piece sent in one stream chunk
 INPUT_MAX  = 64 * 1024         # largest keystroke/paste batch accepted
 BODY_MAX   = 1024 * 1024       # largest JSON request body accepted
+PROXY_BODY_MAX = 64 * 1024 * 1024   # largest upload passed to the Spoof panel
+
+# the official Spoof Tunnel panel (ParsaKSH/spoof-tunnel), as its installer sets it up
+SPOOF_UNIT = os.environ.get("ERISPM_SPOOF_UNIT", "/etc/systemd/system/spoof-panel.service")
+SPOOF_BIN  = "/usr/local/bin/spoof-panel"
+HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+               "trailer", "transfer-encoding", "upgrade", "host", "cookie", "content-length"}
+TLS_ON = False
 
 
 def erispm_argv():
@@ -381,6 +389,61 @@ def find_job(jid):
     return None
 
 
+# ------------------------------------------------------------- spoof panel ----
+# The official Spoof panel runs on its own random port under a random web path
+# (/<web_path>/, settings in its SQLite DB). It is shown inside this panel
+# UNCHANGED through a same-origin reverse proxy: /<web_path>/... plus the
+# root-relative /_next/ assets its Next.js build always asks for.
+_SPOOF = {"t": 0.0, "v": None}
+
+
+def spoof_info():
+    now = time.time()
+    if now - _SPOOF["t"] > 5:
+        _SPOOF["v"], _SPOOF["t"] = _spoof_discover(), now
+    return _SPOOF["v"]
+
+
+def _spoof_discover():
+    try:
+        with open(SPOOF_UNIT, encoding="utf-8") as f:
+            unit = f.read()
+    except OSError:
+        unit = ""
+    if not unit and not os.path.exists(SPOOF_BIN):
+        return {"installed": False, "ready": False}
+    m = re.search(r"-port[= ]+(\d+)", unit)
+    port = int(m.group(1)) if m else 0
+    m = re.search(r"SPOOF_DATA_DIR=\"?([^\s\"]+)", unit)
+    data_dir = m.group(1) if m else "/etc/spoof-panel"
+    web_path = ""
+    try:
+        import sqlite3
+        db = os.path.join(data_dir, "panel.db").replace("\\", "/")
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=2)
+        try:
+            for k, v in con.execute("SELECT key, value FROM settings WHERE key IN ('web_path', 'panel_port')"):
+                if k == "web_path":
+                    web_path = str(v)
+                elif k == "panel_port" and not port and str(v).isdigit():
+                    port = int(v)
+        finally:
+            con.close()
+    except Exception:
+        pass
+    ready = bool(port) and bool(re.match(r"^[A-Za-z0-9_-]{1,64}$", web_path))
+    return {"installed": True, "ready": ready, "port": port if ready else 0,
+            "web_path": web_path if ready else ""}
+
+
+def port_open(port):
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
 def _clamp(v, lo, hi, default):
     try:
         return max(lo, min(hi, int(v)))
@@ -480,6 +543,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(302, "", extra=[("Location", "/login")])
             return self._static("index.html")
         if p in ("/login", "/login.html"):
+            to = self._spoof_login_redirect()
+            if to:
+                return self._send(302, "", extra=[("Location", to)])
             return self._static("login.html")
         if p.startswith("/static/"):
             return self._static(p[len("/static/"):])
@@ -489,13 +555,19 @@ class Handler(BaseHTTPRequestHandler):
                 ("Set-Cookie", f"{COOKIE}=; Path=/; Max-Age=0"),
             ])
         if not p.startswith("/api/"):
-            return self._send(404, "not found")
+            return self._spoof_or_404(p)
         if not self._authed():
             return self._json(401, {"error": "auth"})
         if p == "/api/status":
             return self._run_json(["status", "--json"])
         if p == "/api/backups":
             return self._json(200, {"backups": self._list_backups()})
+        if p == "/api/spoof":
+            sp = dict(spoof_info())
+            if sp.get("ready"):
+                sp["running"] = port_open(sp["port"])
+                sp["path"] = "/" + sp["web_path"] + "/"
+            return self._json(200, sp)
         if p == "/api/job":
             job = JOB
             return self._json(200, {"job": job.info() if job else None})
@@ -503,9 +575,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._stream(parse_qs(u.query))
         return self._send(404, "not found")
 
+    def do_PUT(self):   # only the embedded Spoof panel uses these methods
+        self._spoof_or_404(urlparse(self.path).path)
+
+    do_DELETE = do_PATCH = do_OPTIONS = do_PUT
+
     def do_POST(self):
         u = urlparse(self.path)
         p = u.path
+        if not p.startswith("/api/"):
+            return self._spoof_or_404(p)
         if p == "/api/login":
             return self._login()
         body = self._read_body()   # always drain it, or a kept-alive connection desyncs
@@ -787,6 +866,167 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             return True
 
+    # --- the embedded Spoof panel (reverse proxy) --------------------------------
+    def _spoof_target(self, path):
+        """-> spoof info when this path belongs to the Spoof panel, else None."""
+        sp = spoof_info()
+        if not sp.get("ready"):
+            return None
+        wp = "/" + sp["web_path"]
+        if (path == wp or path.startswith(wp + "/") or path.startswith("/_next/")
+                or re.match(r"^/[\w.-]+\.(ico|svg|png|txt)$", path)):
+            return sp
+        return None
+
+    def _spoof_or_404(self, path):
+        sp = self._spoof_target(path)
+        if sp is None or not self._authed():
+            self._drain_body()
+            if sp is None:
+                return self._send(404, "not found")
+            if self.command == "GET":
+                return self._send(302, "", extra=[("Location", "/login")])
+            return self._send(401, "sign in to the panel first")
+        return self._proxy(sp)
+
+    def _spoof_login_redirect(self):
+        # The Spoof panel sends an expired session to the root "/login", which is
+        # ours here - send it back to its own login page instead.
+        sp = spoof_info()
+        if not sp.get("ready"):
+            return None
+        wp = "/" + sp["web_path"]
+        ref = urlparse(self.headers.get("Referer", "")).path
+        from_spoof = self.headers.get("Sec-Fetch-Dest", "") == "iframe" or ref == wp or ref.startswith(wp + "/")
+        if from_spoof and self._authed():
+            return wp + "/login/"
+        return None
+
+    def _drain_body(self):
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            n = 0
+        if n > BODY_MAX or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+        elif n > 0:
+            self.rfile.read(n)
+
+    def _proxy(self, sp):
+        port = sp["port"]
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return self._send(411, "chunked request bodies are not supported")
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if n > PROXY_BODY_MAX:
+            self.close_connection = True
+            return self._send(413, "request too large")
+        body = self.rfile.read(n) if n > 0 else None
+        if "websocket" in self.headers.get("Upgrade", "").lower():
+            return self._proxy_ws(port)
+        # our session cookie stays here; the Spoof panel uses its own bearer token
+        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
+        hdrs["Host"] = "127.0.0.1:%d" % port
+        hdrs["X-Forwarded-For"] = self.client_address[0]
+        hdrs["X-Forwarded-Proto"] = "https" if TLS_ON else "http"
+        if body is not None:
+            hdrs["Content-Length"] = str(len(body))
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+        try:
+            conn.request(self.command, self.path, body=body, headers=hdrs)
+            resp = conn.getresponse()
+        except (OSError, http.client.HTTPException) as e:
+            conn.close()
+            return self._send(502, f"the Spoof panel is not answering on 127.0.0.1:{port} ({e})")
+        try:
+            self._relay(resp)
+        except (OSError, ValueError, http.client.HTTPException):
+            self.close_connection = True
+        finally:
+            conn.close()
+
+    def _relay(self, resp):
+        self.send_response(resp.status, resp.reason)
+        length = resp.getheader("Content-Length")
+        for k, v in resp.getheaders():
+            if k.lower() in HOP_HEADERS or k.lower() in ("date", "server", "x-frame-options"):
+                continue
+            self.send_header(k, v)
+        self.send_header("X-Frame-Options", "SAMEORIGIN")   # framed by this panel, nobody else
+        no_body = self.command == "HEAD" or resp.status in (204, 304) or resp.status < 200
+        if length is not None:
+            self.send_header("Content-Length", length)
+        elif not no_body:
+            self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        if no_body:
+            return
+        if length is not None:
+            left = int(length)
+            while left > 0:
+                data = resp.read(min(65536, left))
+                if not data:
+                    self.close_connection = True
+                    break
+                self.wfile.write(data)
+                left -= len(data)
+            return
+        read = getattr(resp, "read1", resp.read)
+        while True:
+            data = read(65536)
+            if not data:
+                break
+            self.wfile.write(b"%X\r\n%s\r\n" % (len(data), data))
+        self.wfile.write(b"0\r\n\r\n")
+
+    def _proxy_ws(self, port):
+        # WebSocket (the Spoof panel's live tunnel logs): replay the handshake to
+        # the panel, then pass bytes both ways until one side closes.
+        try:
+            up = socket.create_connection(("127.0.0.1", port), timeout=10)
+        except OSError as e:
+            return self._send(502, f"the Spoof panel is not answering on 127.0.0.1:{port} ({e})")
+        self.close_connection = True
+        try:
+            head = ["%s %s HTTP/1.1" % (self.command, self.path), "Host: 127.0.0.1:%d" % port]
+            head += ["%s: %s" % (k, v) for k, v in self.headers.items() if k.lower() not in ("host", "cookie")]
+            up.sendall(("\r\n".join(head) + "\r\n\r\n").encode("latin-1", "replace"))
+            resp = b""
+            while b"\r\n\r\n" not in resp and len(resp) < 65536:
+                data = up.recv(4096)
+                if not data:
+                    break
+                resp += data
+            self.wfile.write(resp)
+            if not resp.startswith(b"HTTP/1.1 101"):
+                return
+            up.settimeout(None)
+            self.connection.settimeout(None)
+            self._pipe(self.connection, up)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                up.close()
+            except OSError:
+                pass
+
+    def _pipe(self, a, b):
+        while True:
+            pending = getattr(a, "pending", None)   # TLS may hold bytes select() can't see
+            if pending and pending():
+                ready = [a]
+            else:
+                ready, _, _ = select.select([a, b], [], [], 300)
+            for s in ready:
+                data = s.recv(65536)
+                if not data:
+                    return
+                (b if s is a else a).sendall(data)
+
     # --- misc -----------------------------------------------------------------
     def _list_backups(self):
         out = []
@@ -809,6 +1049,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global TLS_ON
     cfg = load_conf()
     port = int(cfg.get("web_port", "8787"))
     httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
@@ -820,6 +1061,7 @@ def main():
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(cert, key)
             httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+            TLS_ON = True
     mode = "pty" if HAVE_PTY else "pipes (no pty on this OS)"
     print(f"eris-panel-web listening on :{port}  [{mode}]", flush=True)
     try:

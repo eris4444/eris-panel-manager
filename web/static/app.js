@@ -120,6 +120,7 @@ function finish(info){
   const w = job.waiters; job.waiters = [];
   w.forEach(fn => fn(info));
   refreshStatus();
+  refreshSpoof();
   if (currentTab === 'backups') refreshBackups();
 }
 
@@ -246,14 +247,47 @@ function fitSoon(){ clearTimeout(fitTimer); fitTimer = setTimeout(fitTerm, 120);
 if ('ResizeObserver' in window) new ResizeObserver(fitSoon).observe(termEl);
 window.addEventListener('resize', fitSoon);
 
+/* ---------------- Spoof Tunnel panel (official, shown unchanged) ---------------- */
+let spoof = null, serverIp = '';
+async function refreshSpoof(){
+  try { spoof = await (await api('/api/spoof')).json(); } catch(_){ return; }
+  const ready = !!spoof.ready;
+  $('#tab-spoof').hidden = !ready;
+  $('#spoof-open').hidden = !ready;
+  $('#spoof-install').hidden = !!spoof.installed;   // never re-run its installer from here
+  const st = $('#spoof-state');
+  st.className = 'spoof-state' + (ready ? (spoof.running ? ' on' : ' off') : '');
+  st.textContent = !spoof.installed ? ''
+    : !ready ? 'installed — its port / web path could not be read'
+    : spoof.running ? '● installed · running' : '● installed · not running (systemctl start spoof-panel)';
+  if (ready) $('#spoof-newtab').href = spoof.path;
+  spoofDirect();
+  if (!ready && currentTab === 'spoof') showTab('dashboard');
+}
+function spoofDirect(){
+  if (spoof && spoof.ready) $('#spoof-direct').textContent = `http://${serverIp || 'SERVER_IP'}:${spoof.port}${spoof.path}`;
+}
+function openSpoof(){
+  const f = $('#spoof-frame');
+  if (spoof && spoof.ready && !f.getAttribute('src')) f.src = spoof.path;
+}
+$('#spoof-open').onclick = () => showTab('spoof');
+$('#spoof-reload').onclick = () => {
+  const f = $('#spoof-frame');
+  if (!spoof || !spoof.ready) return;
+  try { f.contentWindow.location.reload(); } catch(_){ f.src = spoof.path; }
+};
+
 /* ---------------- status ---------------- */
 async function refreshStatus(){
   try {
     const r = await api('/api/status');
     const d = await r.json();
+    serverIp = d.server || '';
     $('#server-ip').textContent = d.server || '—';
     $('#server-ver').textContent = d.version ? 'v'+d.version : '';
     renderStatus(d.panels || []);
+    spoofDirect();
   } catch(_){ /* keep last render */ }
 }
 
@@ -278,11 +312,19 @@ function renderStatus(items){
       actions = `<div class="mini-actions">
         <button class="btn btn-sm btn-primary" data-run='{"action":"install-panel","args":{"key":"${it.key}"}}'>Install</button>
       </div>`;
+    } else if (it.installed && it.key === 'spoof-tunnel'){
+      actions = `<div class="mini-actions">
+        <button class="btn btn-sm" data-open-spoof>Open Spoof panel</button>
+      </div>`;
     }
     card.innerHTML = `<h3><span class="status-row"><span class="dot ${dot}"></span>${it.name}</span>${tag}</h3>${actions}`;
     grid.appendChild(card);
   });
   bindRunButtons(grid);
+  $$('[data-open-spoof]', grid).forEach(b => b.onclick = () => {
+    if (spoof && spoof.ready) showTab('spoof');
+    else { showConsole(true); T.note('! the Spoof panel\'s port / web path could not be read yet'); }
+  });
   $$('[data-del]', grid).forEach(b => b.onclick = () => {
     const key = b.dataset.del;
     const purge = confirm(`Remove ${PRETTY[key]||key}?\n\nA safety backup is taken first.\nPress Cancel to keep its data directory, or OK to also PURGE all data.`);
@@ -392,12 +434,16 @@ $('#migrate-form').addEventListener('submit', e => {
 });
 
 /* ---------------- tabs ---------------- */
+function showTab(name){
+  currentTab = name;
+  $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+  $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+  document.body.classList.toggle('tab-spoof', name === 'spoof');
+  if (name === 'backups') refreshBackups();
+  if (name === 'spoof') openSpoof();
+}
 $('#tabs').addEventListener('click', e => {
-  const t = e.target.closest('.tab'); if (!t) return;
-  currentTab = t.dataset.tab;
-  $$('.tab').forEach(x => x.classList.toggle('active', x === t));
-  $$('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === currentTab));
-  if (currentTab === 'backups') refreshBackups();
+  const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab);
 });
 
 $('#refresh').onclick = refreshStatus;
@@ -406,6 +452,7 @@ $('#refresh').onclick = refreshStatus;
 bindRunButtons();
 T.fit();
 refreshStatus();
+refreshSpoof();
 // re-attach to a running (or the last) task, e.g. after a page reload
 (async () => {
   try {

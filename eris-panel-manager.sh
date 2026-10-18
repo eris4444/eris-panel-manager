@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.2.0"
+SCRIPT_VER="1.3.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -48,6 +48,7 @@ URL_MARZBAN_NODE="https://github.com/Gozargah/Marzban-scripts/raw/master/marzban
 URL_MARZNESHIN="https://github.com/marzneshin/Marzneshin/raw/master/script.sh"
 URL_3XUI="https://raw.githubusercontent.com/mhsanaei/3x-ui/main/install.sh"
 URL_SPOOF="https://raw.githubusercontent.com/ParsaKSH/spoof-tunnel/main/panel/install.sh"
+SPOOF_UNIT="/etc/systemd/system/spoof-panel.service"   # written by the official Spoof installer
 URL_ERISTUN2="https://raw.githubusercontent.com/eris4444/eris-tunnel-2/main/install.sh"
 
 # ==============================================================================
@@ -208,7 +209,8 @@ is_installed() {
     marzban-node)    [ -d /var/lib/marzban-node ] || [ -d /opt/marzban-node ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marzban.*node' ;;
     marzneshin-node) [ -d /var/lib/marznode ] || docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi 'marznode' ;;
     eris-tunnel-2)   [ -x /usr/local/bin/eristun2 ] ;;
-    spoof-tunnel)    [ -d /opt/spoof-tunnel ] || have spoof-tunnel || systemctl list-unit-files 2>/dev/null | grep -qi spoof ;;
+    spoof-tunnel)    [ -x /usr/local/bin/spoof-panel ] || [ -f "$SPOOF_UNIT" ] || [ -d /opt/spoof-tunnel ] || have spoof-tunnel \
+                       || systemctl list-unit-files 2>/dev/null | grep -qi spoof ;;
     *) return 1 ;;
   esac
 }
@@ -229,7 +231,8 @@ is_running() {
     pasarguard-node) _dps | grep -qiE 'pasarguard.*node|pg-node' ;;
     marzneshin-node) _dps | grep -qi 'marznode' ;;
     eris-tunnel-2)   systemctl list-units --type=service 2>/dev/null | grep -qi 'eristun\|backhaul\|gost' ;;
-    spoof-tunnel)    _dps | grep -qi 'spoof' || systemctl is-active --quiet 'spoof-tunnel' 2>/dev/null ;;
+    spoof-tunnel)    systemctl is-active --quiet spoof-panel 2>/dev/null || _dps | grep -qi 'spoof' \
+                       || systemctl is-active --quiet 'spoof-tunnel' 2>/dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -948,8 +951,24 @@ tunnel_install() { # tunnel_install <spoof|spoof-tester|eris-tunnel-2>
   case "$what" in
     spoof|spoof-tunnel|spoof-tester)
       step "Installing Spoof Tunnel  (core + built-in Spoof Tester + web GUI)"
+      if [ -x /usr/local/bin/spoof-panel ] || [ -f "$SPOOF_UNIT" ]; then
+        # The official installer picks a NEW random port and adds another login on
+        # every run, so an existing Spoof panel is left exactly as it is.
+        ok "the Spoof panel is already installed - its port, login and tunnels stay as they are"
+        info "open it inside the erispm web panel: Spoof panel tab (or Tunnels → Open Spoof panel)"
+        if [ "${ERISPM_FORCE:-0}" != "1" ]; then
+          # only an explicit --force or a person at the prompt replaces it (-y does not)
+          if [ "$NONINT" = "1" ] || [ "$ASSUME_YES" = "1" ] \
+             || ! confirm "Run the official installer again anyway (new port + new login)?" n; then
+            info "to reinstall it anyway: erispm tunnel install spoof --force"
+            return 0
+          fi
+        fi
+        warn "running the official installer again - the panel will get a new port and login"
+      fi
       info "the Spoof Tester is bundled inside the Spoof Tunnel core and panel"
-      run_upstream "$URL_SPOOF" ;;
+      run_upstream "$URL_SPOOF" || return $?
+      info "its original panel also opens inside the erispm web panel: Spoof panel tab" ;;
     eris-tunnel-2|eristun2)
       step "Installing Eris Tunnel 2"
       if [ "$NONINT" = "1" ]; then

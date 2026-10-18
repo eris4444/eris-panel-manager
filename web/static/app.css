@@ -119,6 +119,7 @@ h3{margin:0 0 .4rem;font-size:1rem}
 .btn-ghost{background:none;border:1px solid var(--line)}
 .btn-danger{border:none;background:linear-gradient(90deg,#ff8a93,#ff6b76);color:#160608}
 .btn-block{width:100%}
+a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .btn-sm{padding:.3rem .6rem;font-size:.8rem}
 .chips{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1.2rem}
 .chip{
@@ -145,6 +146,17 @@ code{font-family:var(--mono);font-size:.82em;background:rgba(255,255,255,.06);pa
 .check input{width:auto}
 .hint{color:var(--muted);font-size:.85rem;max-width:620px;line-height:1.5}
 .err{color:var(--red);font-size:.85rem;margin:.2rem 0 0}
+
+/* ---- embedded Spoof panel ---- */
+body.tab-spoof .wrap{max-width:none}
+.spoof-state{font-size:.8rem;color:var(--muted);margin:.35rem 0 0}
+.spoof-state.on{color:var(--green)}
+.spoof-state.off{color:var(--yellow)}
+.hint a{color:var(--cyan)}
+.spoof-frame{
+  display:block;width:100%;height:calc(100vh - 250px);min-height:520px;
+  border:1px solid var(--line2);border-radius:var(--radius);background:#0a0a0f;box-shadow:var(--shadow);
+}
 
 /* ---- table ---- */
 .tbl{width:100%;border-collapse:collapse;font-size:.88rem}
