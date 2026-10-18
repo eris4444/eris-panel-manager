@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.1.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.2.0-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -51,7 +51,7 @@ other.
 | **Delete** | Official uninstall + optional data purge — always takes a safety backup first |
 | **Migrate** | Source → new server, **one‑by‑one or all‑at‑once**, with a dry‑run first |
 | **Tunnels** | Spoof Tunnel (+ built‑in Spoof Tester + web GUI) · Eris Tunnel 2 |
-| **Web panel** | Password login, live streaming console, status dashboard — Python 3 stdlib, no pip |
+| **Web panel** | Password login, **interactive in‑browser terminal** (answer installer prompts, open the full menu), status dashboard — Python 3 stdlib, no pip, no CDN |
 | **TUI** | Full‑screen coloured menu, works under any file name |
 
 ---
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.0.0
+   ███████╗██║  ██║██║███████║   v1.2.0
 
   Installed on this server
   ──────────────────────────────────────────
@@ -98,8 +98,8 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
 
 ## The web panel
 
-A dependency‑free dashboard (Python 3 standard library only — nothing from `pip`) that drives
-the same `erispm` backend and streams the live output of every action straight to your browser.
+A dependency‑free dashboard (Python 3 standard library only — nothing from `pip`, nothing from a
+CDN) that drives the same `erispm` backend in a **real terminal inside your browser**.
 
 ```bash
 erispm web install      # pick a port, set a password, optional self-signed HTTPS
@@ -116,7 +116,13 @@ erispm web passwd       # change the admin password
 - **Auth** — username + salted‑SHA‑256 password, HMAC‑signed expiring session cookie, `HttpOnly` + `SameSite=Strict`.
 - **Safety** — every action runs through a strict allow‑list and is executed as a real argument
   vector (never a shell string), so nothing from the browser can inject a command.
-- **Live console** — actions stream their output in real time with colourised `✓ / ✗ / ▸` lines.
+- **Interactive terminal** — every action runs on a pseudo‑terminal on the server, so when an
+  official installer asks a question (node API key, certificate, port, "reinstall?") you just
+  click the terminal and answer. Full colours, Ctrl+V paste, quick keys (Enter, Ctrl‑C, Ctrl‑D,
+  ↑ ↓, Tab, Esc, y, n) for phones, and a **Stop** button (Ctrl‑C → SIGTERM → SIGKILL).
+- **Open erispm menu** — the complete terminal menu, in the browser.
+- **Re‑attach** — reload the page or lose the connection and the running task comes back,
+  with its recent output.
 
 > The web panel runs as `root` (it has to, to manage system services). Put it behind HTTPS,
 > pick a strong password, and only open its port to the addresses you trust.
@@ -146,6 +152,9 @@ erispm update
 ```
 
 Global flags: `-y` / `--yes` (assume yes), `NO_COLOR=1`, `ERISPM_YES=1` (fully non‑interactive).
+
+When a terminal is attached, the official installers may ask their own questions; with no terminal
+(cron, pipes) their stdin is `/dev/null` and a trailing `docker logs -f` is cut short so the run ends.
 
 ---
 

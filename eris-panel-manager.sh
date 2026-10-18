@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.1.0"
+SCRIPT_VER="1.2.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -367,10 +367,11 @@ dashboard() {
 # ==============================================================================
 #  Run an upstream installer (wrapped)
 # ==============================================================================
-# Non-interactive runs (web panel): the upstream panel installers end with
-# `docker compose logs -f`, which never returns. A tiny `docker` shim placed first
-# on PATH drops -f/--follow that come AFTER the word `logs` (so `compose -f file`
-# is untouched) and shows the last lines instead.
+# The upstream panel installers end with `docker compose logs -f`, which never
+# returns. When nobody can press Ctrl-C (no terminal) or the run was started from a
+# web-panel form, a tiny `docker` shim placed first on PATH drops -f/--follow that
+# come AFTER the word `logs` (so `compose -f file` is untouched) and shows the
+# last lines instead.
 _make_logs_shim() { # -> echoes shim dir (empty if docker is absent)
   local real; real="$(command -v docker 2>/dev/null)"; [ -n "$real" ] || return 0
   local d; d="$(mktemp -d)" || return 0
@@ -399,11 +400,16 @@ run_upstream() { # run_upstream URL [args...]
   curl -fsSL --retry 3 --max-time 120 -o "$tmp" "$url" || { rm -f "$tmp"; die "download failed: $url"; }
   sed -i 's/\r$//' "$tmp" 2>/dev/null || true
   local shim="" rc
-  [ "$NONINT" = "1" ] && shim="$(_make_logs_shim)"
-  if [ -n "$shim" ]; then
-    PATH="$shim:$PATH" bash "$tmp" "$@" </dev/null
+  if [ -t 0 ]; then
+    # A terminal is attached (SSH, or the web panel's interactive terminal), so
+    # the official installer may ask its questions and the user answers them.
+    # Form-driven web runs still drop the final `logs -f` so the task can end.
+    [ "$NONINT" = "1" ] && shim="$(_make_logs_shim)"
+    PATH="${shim:+$shim:}$PATH" bash "$tmp" "$@"
   else
-    bash "$tmp" "$@"
+    # no terminal at all (cron, pipes): nothing could answer a prompt
+    shim="$(_make_logs_shim)"
+    PATH="${shim:+$shim:}$PATH" bash "$tmp" "$@" </dev/null
   fi
   rc=$?
   rm -f "$tmp"; [ -n "$shim" ] && rm -rf "$shim"
@@ -481,8 +487,9 @@ install_node() { # install_node <key>
       run_upstream "$URL_MARZBAN_NODE" @ install ;;
     marzneshin-node)
       step "Installing Marzneshin node"
-      # Marzneshin ships node support through its main script.
-      run_upstream "$URL_MARZNESHIN" @ install-node 2>/dev/null \
+      # Marzneshin ships node support through its main script. stderr stays
+      # visible: `read -p` prompts are printed there.
+      run_upstream "$URL_MARZNESHIN" @ install-node \
         || run_upstream "$URL_MARZNESHIN" @ node ;;
     *) die "unknown node: $key" ;;
   esac
@@ -846,7 +853,7 @@ delete_panel() { # delete_panel <key> [--purge]
       if have x-ui; then echo y | x-ui uninstall 2>/dev/null || warn "run 'x-ui' → uninstall manually"; fi ;;
     pasarguard-node) run_upstream "$URL_PG_NODE"      @ uninstall ;;
     marzban-node)    run_upstream "$URL_MARZBAN_NODE" @ uninstall ;;
-    marzneshin-node) run_upstream "$URL_MARZNESHIN"   @ uninstall-node 2>/dev/null || true ;;
+    marzneshin-node) run_upstream "$URL_MARZNESHIN"   @ uninstall-node || true ;;
     *) die "unknown target: $key" ;;
   esac
   if [ "$purge" = "--purge" ]; then
@@ -1000,7 +1007,7 @@ WEB_PORT_DEFAULT="8787"
 web_fetch_assets() { # [force] - force re-downloads every file (used by updates)
   local force="${1:-}" f tmp fail=0
   mkdir -p "$WEB_DIR/static"
-  for f in server.py static/index.html static/login.html static/app.css static/app.js; do
+  for f in server.py static/index.html static/login.html static/app.css static/app.js static/term.js; do
     [ -z "$force" ] && [ -f "$WEB_DIR/$f" ] && continue
     tmp="$(mktemp)"
     # download to a temp file first so a failed fetch never wipes a working file

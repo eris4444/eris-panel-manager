@@ -2,6 +2,7 @@
 'use strict';
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const sleep = ms => new Promise(res => setTimeout(res, ms));
 
 const PANEL_KEYS = ['pasarguard','marzban','marzneshin','3x-ui'];
 const PRETTY = {
@@ -9,73 +10,246 @@ const PRETTY = {
   'pasarguard-node':'PasarGuard node','marzban-node':'Marzban node','marzneshin-node':'Marzneshin node',
   'spoof-tunnel':'Spoof Tunnel','eris-tunnel-2':'Eris Tunnel 2'
 };
+let currentTab = 'dashboard';
 
-/* ---------------- console ---------------- */
-const con = {
-  box: $('#console'),
-  body: $('#console-body'),
-  dot: $('#run-dot'),
-  busy: false,
-  line(text){
-    const span = document.createElement('span');
-    const t = text;
-    if (/^\s*✓/.test(t)) span.className = 'c-ok';
-    else if (/^\s*✗/.test(t)) span.className = 'c-bad';
-    else if (/^\s*·/.test(t)) span.className = 'c-info';
-    else if (/^\s*!/.test(t)) span.className = 'c-warn';
-    else if (/^\s*▸/.test(t)) span.className = 'c-step';
-    else if (/^\s*\$/.test(t)) span.className = 'c-cmd';
-    span.textContent = t;
-    this.body.appendChild(span);
-    this.body.scrollTop = this.body.scrollHeight;
-  },
-  write(chunk){ chunk.split(/(?<=\n)/).forEach(l => { if (l) this.line(l); }); },
-  clear(){ this.body.textContent = ''; },
-  setBusy(b){
-    this.busy = b;
-    this.dot.className = 'dot ' + (b ? 'dot-busy' : 'dot-idle');
-    if (b && this.box.classList.contains('collapsed')) this.box.classList.remove('collapsed');
-  }
-};
-$('#console-clear').onclick = () => con.clear();
-$('#console-toggle').onclick = (e) => {
-  con.box.classList.toggle('collapsed');
-  e.target.textContent = con.box.classList.contains('collapsed') ? 'show' : 'hide';
-};
-
-/* ---------------- run & stream ---------------- */
-let running = false;
-async function runStream(action, args){
-  if (running){ con.line('\n! a task is already running — wait for it to finish\n'); return; }
-  running = true; con.setBusy(true);
-  con.line(`\n──────── ${action} ────────\n`);
-  try {
-    const r = await fetch('/api/run', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({action, args})
-    });
-    if (r.status === 401){ location.href = '/login'; return; }
-    if (!r.body){ con.line(await r.text()); return; }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    for(;;){
-      const {value, done} = await reader.read();
-      if (done) break;
-      con.write(dec.decode(value, {stream:true}));
-    }
-  } catch(err){
-    con.line(`\n[error] ${err}\n`);
-  } finally {
-    running = false; con.setBusy(false);
-    refreshStatus(); if (currentTab === 'backups') refreshBackups();
-  }
+// GET when body is undefined, JSON POST otherwise; a lost session goes back to /login
+async function api(url, body){
+  const opt = body === undefined ? {cache:'no-store'}
+    : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
+  const r = await fetch(url, opt);
+  if (r.status === 401){ location.href = '/login'; throw new Error('auth'); }
+  return r;
 }
+
+/* ---------------- terminal ---------------- */
+const consoleEl = $('#console');
+const termEl = $('#term');
+const tin = $('#term-input');
+const T = new ErisTerm(termEl);
+
+// the task this page is attached to (one task runs at a time on the server)
+const job = {id:null, done:true, offset:0, replayEnd:0, dec:null, waiters:[]};
+let stopStage = 0, stopTimer = 0;
+
+function showConsole(show){
+  consoleEl.classList.toggle('collapsed', !show);
+  document.body.classList.toggle('console-open', show);
+  $('#console-hide').textContent = show ? 'Hide' : 'Show';
+}
+$('#console-toggle').onclick = () => showConsole(consoleEl.classList.contains('collapsed'));
+$('#console-hide').onclick = () => showConsole(consoleEl.classList.contains('collapsed'));
+$('#console-size').onclick = () => {
+  const big = !consoleEl.classList.contains('expanded');
+  consoleEl.classList.toggle('expanded', big);
+  document.body.classList.toggle('console-big', big);
+  $('#console-size').textContent = big ? 'Shrink' : 'Expand';
+  showConsole(true);
+};
+$('#console-clear').onclick = () => T.clear();
+
+function setJobUI(info){
+  const running = !!(info && !info.done);
+  $('#run-dot').className = 'dot ' + (running ? 'dot-busy' : 'dot-idle');
+  $('#job-title').textContent = info ? info.title : 'idle';
+  const st = $('#job-state');
+  if (!info){ st.textContent = ''; st.className = 'job-state'; }
+  else if (running){ st.textContent = 'running'; st.className = 'job-state run'; }
+  else if (info.rc === null || info.rc === undefined){ st.textContent = 'ended'; st.className = 'job-state'; }
+  else { st.textContent = 'exit ' + info.rc; st.className = 'job-state ' + (info.rc === 0 ? 'ok' : 'bad'); }
+  const stop = $('#job-stop');
+  stop.disabled = !running;
+  stop.textContent = stopStage ? '■ Kill' : '■ Stop';
+  $$('#term-keys .key').forEach(b => b.disabled = !running);
+  $('#term-hint').textContent = !running ? 'no task running'
+    : info.pty === false ? 'no pty on this OS — line mode only' : 'click the terminal to type';
+  T.setActive(running);
+}
+
+function attach(info, fresh){
+  job.id = info.id; job.done = !!info.done; job.offset = 0;
+  job.replayEnd = fresh ? 0 : (info.end || 0);   // replayed bytes never answer terminal queries
+  job.dec = new TextDecoder();
+  job.waiters = [];
+  stopStage = 0; clearTimeout(stopTimer);
+  setJobUI(info);
+  pump(info.id);
+}
+
+// Stream the task's output; on a dropped connection re-attach from the last byte seen.
+async function pump(id){
+  let fails = 0;
+  while (job.id === id){
+    try {
+      const r = await api(`/api/stream?job=${encodeURIComponent(id)}&from=${job.offset}`);
+      if (r.status === 404) break;
+      if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+      const from = parseInt(r.headers.get('X-Stream-From') || '', 10);
+      if (from > job.offset) job.offset = from;   // older output was trimmed on the server
+      const rd = r.body.getReader();
+      for (;;){
+        const {value, done} = await rd.read();
+        if (done) break;
+        if (job.id !== id){ rd.cancel().catch(() => {}); return; }
+        T.mute = job.offset < job.replayEnd;
+        job.offset += value.length;
+        T.write(job.dec.decode(value, {stream:true}));
+      }
+      fails = 0;
+    } catch (e){
+      if (e && e.message === 'auth') return;
+      fails++;
+    }
+    T.mute = false;
+    if (job.id !== id) return;
+    // the stream closed: either the task ended or the connection dropped
+    let info = null, ok = false;
+    try { info = (await (await api('/api/job')).json()).job; ok = true; } catch (_) {}
+    if (ok){
+      if (!info || info.id !== id) break;              // the server no longer has this task
+      if (info.done && job.offset >= info.end){ finish(info); return; }
+    }
+    await sleep(Math.min(5000, 500 * (fails + 1)));
+  }
+  if (job.id === id && !job.done) finish({id, title:$('#job-title').textContent, done:true, rc:null});
+}
+
+function finish(info){
+  job.done = true;
+  stopStage = 0; clearTimeout(stopTimer);
+  setJobUI(info);
+  const w = job.waiters; job.waiters = [];
+  w.forEach(fn => fn(info));
+  refreshStatus();
+  if (currentTab === 'backups') refreshBackups();
+}
+
+// Start a task. Resolves with its final info when it ends, or null if it could not start.
+async function runJob(action, args){
+  showConsole(true);
+  if (job.id && !job.done){
+    T.note('! a task is still running — answer it in the terminal, or press Stop first');
+    return null;
+  }
+  let r, d = {};
+  try {
+    r = await api('/api/run', {action, args: args || {}, rows: T.rows, cols: T.cols});
+    d = await r.json().catch(() => ({}));
+  } catch (e){
+    if (e.message !== 'auth') T.note('✗ cannot reach the panel: ' + e.message, '38;5;203');
+    return null;
+  }
+  if (r.status === 409 && d.job){
+    T.note('! another task is running: ' + d.job.title);
+    if (job.id !== d.job.id) attach(d.job, false);
+    return null;
+  }
+  if (!r.ok || !d.job){ T.note('✗ ' + (d.error || 'HTTP ' + r.status), '38;5;203'); return null; }
+  T.softReset();
+  if (T.x > 0) T.write('\r\n');
+  if (T.y > 0) T.write('\r\n');
+  attach(d.job, true);
+  const done = new Promise(res => job.waiters.push(res));
+  if (action === 'menu') focusTerm();
+  return done;
+}
+
+/* ---- keyboard → task ---- */
+const inq = {buf:'', timer:0, busy:false};
+function sendInput(s){
+  if (!s || !job.id || job.done) return;
+  inq.buf += s;
+  if (!inq.timer && !inq.busy) inq.timer = setTimeout(flushInput, 15);   // batch keystrokes
+}
+async function flushInput(){
+  inq.timer = 0;
+  if (inq.busy || !inq.buf) return;
+  const data = inq.buf.slice(0, 60000);
+  inq.buf = inq.buf.slice(data.length);
+  inq.busy = true;
+  try { await api('/api/input', {job: job.id, data}); } catch (_) {}
+  inq.busy = false;
+  if (inq.buf) inq.timer = setTimeout(flushInput, 15);
+}
+T.onReply = sendInput;
+
+function focusTerm(){ tin.focus({preventScroll:true}); }
+termEl.addEventListener('mouseup', () => {
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && String(sel).length) return;   // let people select & copy
+  focusTerm();
+});
+tin.addEventListener('focus', () => termEl.classList.add('focused'));
+tin.addEventListener('blur', () => termEl.classList.remove('focused'));
+tin.addEventListener('keydown', e => {
+  if (e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')){
+    termEl.scrollTop += (e.key === 'PageUp' ? -0.9 : 0.9) * termEl.clientHeight;
+    e.preventDefault();
+    return;
+  }
+  const seq = T.keySeq(e);
+  if (seq === null || seq === '') return;   // browser default / the input event sends the text
+  e.preventDefault();
+  sendInput(seq);
+  termEl.scrollTop = termEl.scrollHeight;
+});
+let composing = false;
+function flushTextarea(){
+  const v = tin.value;
+  tin.value = '';
+  if (v){ sendInput(v.replace(/\r?\n/g, '\r')); termEl.scrollTop = termEl.scrollHeight; }
+}
+tin.addEventListener('compositionstart', () => { composing = true; });
+tin.addEventListener('compositionend', () => { composing = false; flushTextarea(); });
+tin.addEventListener('input', () => { if (!composing) flushTextarea(); });
+tin.addEventListener('paste', e => {
+  const t = (e.clipboardData || window.clipboardData).getData('text');
+  e.preventDefault();
+  if (t) sendInput(T.pasteSeq(t));
+});
+
+const QUICK = {enter:'\r', ctrlc:'\x03', ctrld:'\x04', tab:'\t', esc:'\x1b', y:'y', n:'n'};
+$$('#term-keys .key').forEach(b => {
+  b.addEventListener('mousedown', e => e.preventDefault());   // keep the focus in the terminal
+  b.addEventListener('click', () => {
+    const k = b.dataset.key;
+    const pre = T.appCursor ? '\x1bO' : '\x1b[';
+    sendInput(k === 'up' ? pre + 'A' : k === 'down' ? pre + 'B' : QUICK[k]);
+  });
+});
+
+// Stop: Ctrl-C (SIGINT) first, SIGTERM 2.5 s later; pressing again sends SIGKILL
+$('#job-stop').onclick = () => {
+  if (!job.id || job.done) return;
+  const id = job.id;
+  if (stopStage){
+    api('/api/signal', {job:id, sig:'KILL'}).catch(() => {});
+    T.note('■ SIGKILL sent', '38;5;203');
+    return;
+  }
+  stopStage = 1;
+  $('#job-stop').textContent = '■ Kill';
+  api('/api/signal', {job:id, sig:'INT'}).catch(() => {});
+  stopTimer = setTimeout(() => {
+    if (job.id === id && !job.done) api('/api/signal', {job:id, sig:'TERM'}).catch(() => {});
+  }, 2500);
+};
+
+$$('.open-menu').forEach(b => b.onclick = () => runJob('menu', {}));
+
+// keep the server-side terminal size in step with the visible one
+let fitTimer = 0;
+function fitTerm(){
+  if (!T.fit()) return;
+  if (job.id && !job.done) api('/api/resize', {job: job.id, rows: T.rows, cols: T.cols}).catch(() => {});
+}
+function fitSoon(){ clearTimeout(fitTimer); fitTimer = setTimeout(fitTerm, 120); }
+if ('ResizeObserver' in window) new ResizeObserver(fitSoon).observe(termEl);
+window.addEventListener('resize', fitSoon);
 
 /* ---------------- status ---------------- */
 async function refreshStatus(){
   try {
-    const r = await fetch('/api/status');
-    if (r.status === 401){ location.href='/login'; return; }
+    const r = await api('/api/status');
     const d = await r.json();
     $('#server-ip').textContent = d.server || '—';
     $('#server-ver').textContent = d.version ? 'v'+d.version : '';
@@ -114,7 +288,7 @@ function renderStatus(items){
     const purge = confirm(`Remove ${PRETTY[key]||key}?\n\nA safety backup is taken first.\nPress Cancel to keep its data directory, or OK to also PURGE all data.`);
     // confirm() can't do 3 states cleanly; ask purge explicitly
     const reallyPurge = purge && confirm('Also PURGE the data directory? This is irreversible.');
-    runStream('delete-panel', {key, purge: reallyPurge});
+    runJob('delete-panel', {key, purge: reallyPurge});
   });
 }
 
@@ -131,8 +305,7 @@ function human(n){
 }
 async function refreshBackups(){
   try{
-    const r = await fetch('/api/backups');
-    if (r.status === 401){ location.href='/login'; return; }
+    const r = await api('/api/backups');
     const d = await r.json();
     const tb = $('#backup-tbl tbody'); tb.innerHTML = '';
     (d.backups || []).forEach(b => {
@@ -145,7 +318,7 @@ async function refreshBackups(){
     $$('[data-restore]', tb).forEach(btn => btn.onclick = () => {
       const a = JSON.parse(btn.dataset.restore);
       if (confirm(`Restore ${PRETTY[a.key]||a.key} from this archive? Current data will be overwritten.`))
-        runStream('restore', a);
+        runJob('restore', a);
     });
     if (!(d.backups||[]).length) tb.innerHTML = '<tr><td colspan="4" class="muted">no backups yet</td></tr>';
   }catch(_){}
@@ -159,11 +332,13 @@ function bindRunButtons(root=document){
       let spec;
       try { spec = JSON.parse(btn.dataset.run); } catch(_){ return; }
       if (spec.action === 'backup' && spec.args.key === 'ALL'){
-        // loop every installed panel on the client side
-        (async () => { for (const k of PANEL_KEYS) await runStream('backup', {key:k}); })();
+        // loop every panel on the client side, one task after another
+        (async () => {
+          for (const k of PANEL_KEYS){ if (await runJob('backup', {key:k}) === null) break; }
+        })();
         return;
       }
-      runStream(spec.action, spec.args || {});
+      runJob(spec.action, spec.args || {});
     };
   });
 }
@@ -184,7 +359,7 @@ fillApplySelects();
 $('#cert-form').addEventListener('submit', e => {
   e.preventDefault();
   const f = e.target;
-  runStream('cert-issue', {
+  runJob('cert-issue', {
     domain:f.domain.value.trim(), email:f.email.value.trim(),
     method:f.method.value, apply:f.apply.value
   });
@@ -192,7 +367,7 @@ $('#cert-form').addEventListener('submit', e => {
 $('#cert-import-form').addEventListener('submit', e => {
   e.preventDefault();
   const f = e.target;
-  runStream('cert-import', {
+  runJob('cert-import', {
     domain:f.domain.value.trim(), cert:f.cert.value, key:f.key.value, apply:f.apply.value
   });
 });
@@ -200,9 +375,9 @@ $('#cert-apply-form').addEventListener('submit', e => {
   e.preventDefault();
   const f = e.target;
   if (!f.domain.value.trim()) return;
-  runStream('cert-apply', {domain:f.domain.value.trim(), apply:f.apply.value});
+  runJob('cert-apply', {domain:f.domain.value.trim(), apply:f.apply.value});
 });
-$('#cert-list-btn').onclick = () => runStream('cert-list', {});
+$('#cert-list-btn').onclick = () => runJob('cert-list', {});
 
 $('#migrate-form').addEventListener('submit', e => {
   e.preventDefault();
@@ -213,11 +388,10 @@ $('#migrate-form').addEventListener('submit', e => {
     dry_run: f.dry_run.checked
   };
   if (!args.dry_run && !confirm('Run the REAL migration now? The destination will be modified.')) return;
-  runStream('migrate', args);
+  runJob('migrate', args);
 });
 
 /* ---------------- tabs ---------------- */
-let currentTab = 'dashboard';
 $('#tabs').addEventListener('click', e => {
   const t = e.target.closest('.tab'); if (!t) return;
   currentTab = t.dataset.tab;
@@ -230,5 +404,16 @@ $('#refresh').onclick = refreshStatus;
 
 /* ---------------- boot ---------------- */
 bindRunButtons();
+T.fit();
 refreshStatus();
-setInterval(() => { if (!running && currentTab === 'dashboard') refreshStatus(); }, 15000);
+// re-attach to a running (or the last) task, e.g. after a page reload
+(async () => {
+  try {
+    const info = (await (await api('/api/job')).json()).job;
+    if (info){
+      attach(info, false);
+      if (!info.done) showConsole(true);
+    }
+  } catch(_){}
+})();
+setInterval(() => { if ((!job.id || job.done) && currentTab === 'dashboard') refreshStatus(); }, 15000);

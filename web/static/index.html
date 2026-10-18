@@ -37,13 +37,18 @@
   <section class="panel active" data-panel="dashboard">
     <div class="section-head">
       <h2>Overview</h2>
-      <button class="btn btn-ghost" id="refresh">↻ Refresh</button>
+      <div class="head-actions">
+        <button class="btn btn-ghost open-menu" type="button">▸ Open erispm menu</button>
+        <button class="btn btn-ghost" id="refresh" type="button">↻ Refresh</button>
+      </div>
     </div>
     <div class="grid" id="status-grid"></div>
   </section>
 
   <!-- INSTALL -->
   <section class="panel" data-panel="install">
+    <p class="hint">The official installers run in the terminal below. If one asks a question
+      (port, domain, API key, certificate…), click the terminal and type the answer.</p>
     <h2>Panels</h2>
     <div class="grid">
       <div class="card"><h3>PasarGuard</h3><p class="muted">Xray panel (Marzban fork)</p>
@@ -189,18 +194,43 @@
 
 </main>
 
-<!-- LIVE CONSOLE -->
-<aside class="console" id="console">
+<!-- INTERACTIVE TERMINAL -->
+<aside class="console collapsed" id="console">
   <div class="console-head">
-    <span><span class="dot dot-idle" id="run-dot"></span> Live console</span>
-    <div>
-      <button class="btn btn-ghost btn-sm" id="console-clear">clear</button>
-      <button class="btn btn-ghost btn-sm" id="console-toggle">hide</button>
+    <button class="console-title" id="console-toggle" type="button" title="Show / hide the terminal">
+      <span class="dot dot-idle" id="run-dot"></span>
+      <span class="console-name">Terminal</span>
+      <span class="job-title" id="job-title">idle</span>
+      <span class="job-state" id="job-state"></span>
+    </button>
+    <div class="console-actions">
+      <button class="btn btn-ghost btn-sm open-menu" type="button">Open erispm menu</button>
+      <button class="btn btn-ghost btn-sm btn-stop" id="job-stop" type="button" disabled>■ Stop</button>
+      <button class="btn btn-ghost btn-sm" id="console-clear" type="button">Clear</button>
+      <button class="btn btn-ghost btn-sm" id="console-size" type="button">Expand</button>
+      <button class="btn btn-ghost btn-sm" id="console-hide" type="button">Show</button>
     </div>
   </div>
-  <pre class="console-body" id="console-body"></pre>
+  <div class="term-wrap">
+    <div class="term" id="term"></div>
+    <textarea class="term-input" id="term-input" aria-label="Terminal input" rows="1"
+      autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+  </div>
+  <div class="term-keys" id="term-keys">
+    <span class="term-hint" id="term-hint">no task running</span>
+    <button class="key" type="button" data-key="enter" disabled>Enter</button>
+    <button class="key" type="button" data-key="ctrlc" disabled>Ctrl-C</button>
+    <button class="key" type="button" data-key="ctrld" disabled>Ctrl-D</button>
+    <button class="key" type="button" data-key="up" disabled>↑</button>
+    <button class="key" type="button" data-key="down" disabled>↓</button>
+    <button class="key" type="button" data-key="tab" disabled>Tab</button>
+    <button class="key" type="button" data-key="esc" disabled>Esc</button>
+    <button class="key" type="button" data-key="y" disabled>y</button>
+    <button class="key" type="button" data-key="n" disabled>n</button>
+  </div>
 </aside>
 
+<script src="/static/term.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

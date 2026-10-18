@@ -3,6 +3,39 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-18
+
+### Added
+- **Interactive web terminal.** The web panel's one-way console is replaced by a real terminal:
+  every task runs `erispm` on a pseudo-terminal (PTY) on the server, so the official installers
+  that **ask questions** — node API key or certificate paste, 3x-ui port/SSL questions,
+  "reinstall?" prompts, `read` loops — can now be answered from the browser. Click the
+  terminal and type, paste with Ctrl+V, or use the quick keys (Enter, Ctrl-C, Ctrl-D, ↑ ↓,
+  Tab, Esc, y, n).
+- **Open erispm menu** — the full interactive `erispm` menu, right in the browser.
+- The terminal renderer is self-written and loads nothing from a CDN (works where CDNs are
+  filtered): 16 / 256 / truecolor, bold / dim / italic / underline / inverse, cursor movement,
+  erase, scroll regions, the alternate screen, DEC line drawing and a 5000-line scrollback.
+  Its size follows the window (the server's PTY is resized to match).
+- **Re-attach** — the server keeps the last ~2 MB of a task's output, so reloading the page or
+  a dropped connection picks the running task up where it was.
+- **Stop** sends Ctrl-C (SIGINT) and then SIGTERM; pressing it again sends SIGKILL. One task
+  runs at a time; starting another while one is running is refused.
+- Web API: `POST /api/run` → job, `GET /api/stream?job=&from=`, `POST /api/input`,
+  `POST /api/signal`, `POST /api/resize`, `GET /api/job`.
+
+### Changed
+- `run_upstream`: when a terminal is attached (SSH, or the web terminal) upstream installers
+  keep their stdin and may prompt. The `docker logs -f` shim and `</dev/null` are only used
+  when there is no terminal; web **form** actions still use the shim so they finish on their own.
+- Marzneshin node install/uninstall no longer hide stderr, where `read -p` prompts appear.
+- Web panel: POST bodies must be JSON (415 otherwise) and are always read, which fixes a
+  keep-alive mix-up after an early error reply; static files are sent with
+  `Cache-Control: no-cache` so an update shows up right away.
+
+### Upgrade
+`erispm update` (or re-run `install.sh`) — it also downloads the new `web/static/term.js`.
+
 ## [1.1.0] — 2026-10-18
 
 ### Fixed
@@ -60,5 +93,6 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.2.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.2.0
 [1.1.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.1.0
 [1.0.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.0.0
