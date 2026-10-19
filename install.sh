@@ -63,7 +63,7 @@ ok "installed erispm v${ver:-?} to $DEST"
 # --- fetch web panel assets ---------------------------------------------------
 info "fetching web panel"
 web_ok=1
-for f in server.py static/index.html static/login.html static/app.css static/app.js static/term.js; do
+for f in server.py static/index.html static/login.html static/app.css static/app.js static/term.js static/spoof.js; do
   if ! curl -fsSL --retry 3 --max-time 60 -o "$WEB_DIR/$f" "$REPO_RAW/web/$f"; then
     web_ok=0; bad "could not fetch web/$f"
   fi

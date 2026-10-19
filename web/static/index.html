@@ -195,19 +195,9 @@
     </div>
   </section>
 
-  <!-- SPOOF PANEL: the official panel, shown here unchanged -->
+  <!-- SPOOF: a native Eris UI over the official Spoof Tunnel backend -->
   <section class="panel" data-panel="spoof">
-    <div class="section-head">
-      <h2>Spoof Tunnel panel</h2>
-      <div class="head-actions">
-        <button class="btn btn-ghost" id="spoof-reload" type="button">↻ Reload</button>
-        <a class="btn btn-ghost" id="spoof-newtab" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
-      </div>
-    </div>
-    <p class="hint">The original panel from <a href="https://github.com/ParsaKSH/spoof-tunnel" target="_blank" rel="noopener noreferrer">ParsaKSH/spoof-tunnel</a>,
-      unchanged, served through this panel. Sign in with the username and password its installer printed.
-      Direct address: <code id="spoof-direct">—</code></p>
-    <iframe class="spoof-frame" id="spoof-frame" title="Spoof Tunnel panel"></iframe>
+    <div id="spoof-root"></div>
   </section>
 
 </main>
@@ -249,6 +239,7 @@
 </aside>
 
 <script src="/static/term.js"></script>
+<script src="/static/spoof.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

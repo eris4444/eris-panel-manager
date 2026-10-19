@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.3.0"
+SCRIPT_VER="1.4.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -1026,7 +1026,7 @@ WEB_PORT_DEFAULT="8787"
 web_fetch_assets() { # [force] - force re-downloads every file (used by updates)
   local force="${1:-}" f tmp fail=0
   mkdir -p "$WEB_DIR/static"
-  for f in server.py static/index.html static/login.html static/app.css static/app.js static/term.js; do
+  for f in server.py static/index.html static/login.html static/app.css static/app.js static/term.js static/spoof.js; do
     [ -z "$force" ] && [ -f "$WEB_DIR/$f" ] && continue
     tmp="$(mktemp)"
     # download to a temp file first so a failed fetch never wipes a working file

@@ -3,6 +3,31 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-10-19
+
+### Added
+- **A native, Eris-designed Spoof Tunnel UI.** The Spoof panel tab is now its own interface built
+  into the erispm web panel — same dark-glass cyan/purple look as the rest — instead of embedding
+  the upstream panel in a frame. It drives the official
+  [ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel) backend's REST API through the
+  same-origin reverse proxy, so the tunnel core and its API stay upstream and unchanged:
+  - **Tunnels** — list with live status, start / stop / restart, create, edit and delete; a full
+    editor (local / remote mode, transports, XDP, spoof settings) with a Spoof-IP-list tab and a
+    live-logs tab (WebSocket).
+  - **Spoof Tester** — receiver / sender runs with live progress and results, pass/fail table, and
+    copy / download of the passing IPs.
+  - **Settings** — change the Spoof panel password.
+  - You sign in once with the Spoof panel's own username/password (what its installer printed); the
+    token is kept in the browser only, and an expired session drops back to the Spoof sign-in.
+- The original panel is still one click away ("Original panel ↗" opens it in a new tab).
+
+### Changed
+- The Spoof tab no longer uses an iframe (the embed added in 1.3.0); the reverse proxy now serves
+  the backend's JSON API and WebSocket logs to the native UI.
+
+### Upgrade
+`erispm update` (or re-run `install.sh`) — it also downloads the new `web/static/spoof.js`.
+
 ## [1.3.0] — 2026-10-19
 
 ### Added
@@ -113,6 +138,7 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.4.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.0
 [1.3.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.3.0
 [1.2.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.2.0
 [1.1.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.1.0
