@@ -10,7 +10,7 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 [🇬🇧 English](README.md)
 
-![version](https://img.shields.io/badge/version-1.5.1-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.6.0-5fd7ff?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
 
 <img src="docs/web-install.jpg" alt="Eris Panel Manager" width="85%">
@@ -193,10 +193,15 @@ erispm spoof set-login --user newadmin --pass 'new-password'   # جایگزین�
 erispm spoof add-user  --user teammate --pass 'their-password' # افزودن یک لاگین
 ```
 
-یک **تست سریع قابلیت اسپوف** هم توی منوی Tunnels هست. اگه بهش دسترسی SSH سرور مقابلت رو بدی، خودش روی اون
-سرور `tcpdump` می‌گیره، از این طرف یک برست ICMP جعلی می‌فرسته و خودش **PASS/FAIL** می‌گه که پکت‌های جعلی واقعاً
-رسیدن یا نه (یعنی می‌فهمی provider اجازهٔ اسپوف می‌ده و کدوم IPها کار می‌کنن). بدون SSH هم حالت دستی
-(«خودت `tcpdump` رو ببین») کار می‌کنه.
+**اصلاً اسپوف روی این سرور کار می‌کنه؟** اگه هیچ‌وقت IP ای توی Tester سبز نشد، اول این رو چک کن — همین
+توی تب **Spoof Tester** پنل هست («Does spoofing work on this server?»):
+- *Check this server* (فوری) — آیا این سرور اصلاً می‌تونه raw socket باز کنه و پکت جعلی بسازه؟
+- *Full check* (با دادن SSH سرور مقابلت) — روی اون سرور `tcpdump` می‌گیره، یک برست ICMP جعلی می‌فرسته و
+  **PASS/FAIL** می‌گه که پکت‌های جعلی واقعاً رسیدن یا نه. **FAIL** یعنی provider اسپوف رو بلاک می‌کنه
+  (egress filtering) و Spoof Tunnel از اون سرور کار نمی‌ده.
+
+همین تست توی منوی `erispm` هم هست (Tunnels → Quick spoof-capability check) و یک حالت دستی («خودت
+`tcpdump` رو ببین») هم دارد که اگه نخوای SSH بدی.
 
 ---
 

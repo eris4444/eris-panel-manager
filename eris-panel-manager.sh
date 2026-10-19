@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.5.1"
+SCRIPT_VER="1.6.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -1027,6 +1027,39 @@ spoof_admin() { # spoof_admin <set-login|add-user> --user U (--pass-env VAR | --
   fi
 }
 
+# Scriptable spoof-capability check (used by the web panel). Sends a short spoofed
+# ICMP burst to --target and, over SSH to that server, counts how many arrive with
+# tcpdump. Prints one machine-readable line: RESULT: PASS|FAIL|NO_TCPDUMP|NOSSH|ERROR
+spoof_check_cli() {
+  need_root
+  ensure_pkg iptables
+  local tgt spf host port user penv pass
+  tgt="$(getflag --target "$@")"
+  spf="$(getflag --spoof-ip "$@")"; [ -n "$spf" ] || spf="1.1.1.1"
+  host="$(getflag --ssh-host "$@")"; [ -n "$host" ] || host="$tgt"
+  user="$(getflag --ssh-user "$@")"; [ -n "$user" ] || user="root"
+  port="$(getflag --ssh-port "$@")"; [ -n "$port" ] || port="22"
+  penv="$(getflag --ssh-pass-env "$@")"; pass=""; [ -n "$penv" ] && pass="$(printenv "$penv" 2>/dev/null)"
+  [ -n "$tgt" ] || { echo "RESULT: ERROR need --target"; return 2; }
+  if ! _ssh "$host" "$port" "$user" "$pass" "echo ok" 2>/dev/null | grep -q ok; then
+    echo "RESULT: NOSSH"; return 0
+  fi
+  local capout cappid out
+  capout="$(mktemp)"
+  _ssh "$host" "$port" "$user" "$pass" \
+    "if command -v tcpdump >/dev/null 2>&1; then timeout 12 tcpdump -ni any -c 10 'icmp and src host $spf' 2>/dev/null | wc -l; else echo NO_TCPDUMP; fi" \
+    >"$capout" 2>/dev/null &
+  cappid=$!
+  sleep 4
+  _spoof_send_burst "$tgt" "$spf" 6
+  wait "$cappid" 2>/dev/null || true
+  out="$(tail -n1 "$capout" 2>/dev/null | tr -cd '0-9A-Z_')"; rm -f "$capout"
+  if [ "$out" = "NO_TCPDUMP" ]; then echo "RESULT: NO_TCPDUMP"
+  elif [ -n "$out" ] && [ "$out" -gt 0 ] 2>/dev/null; then echo "RESULT: PASS packets=$out spoof=$spf target=$tgt"
+  elif [ -n "$out" ]; then echo "RESULT: FAIL spoof=$spf target=$tgt"
+  else echo "RESULT: UNKNOWN"; fi
+}
+
 _install_eristun2_headless() {
   local raw="https://raw.githubusercontent.com/eris4444/eris-tunnel-2/main/eris-tunnel-2.sh"
   local dest="/usr/local/bin/eristun2" base="/etc/eris-tunnel-2" tmp ver
@@ -1567,6 +1600,7 @@ ${BOLD}Eris Panel Manager${N}  v$SCRIPT_VER
   ${C}erispm migrate${N} --to user@host [--port 22] [--password-env VAR] --panels a,b,c|ALL [--dry-run]
   ${C}erispm tunnel install${N} <spoof|eris-tunnel-2>
   ${C}erispm spoof${N} <set-login|add-user> --user U --pass P   (or --pass-env VAR)
+  ${C}erispm spoof check${N} --target IP --spoof-ip IP --ssh-host H [--ssh-user U --ssh-port P --ssh-pass-env VAR]
   ${C}erispm web${N} <install|update|start|stop|restart|status|url|passwd>
   ${C}erispm status${N}                   human status    ${C}erispm status --json${N}   machine status
   ${C}erispm update${N}                   self-update
@@ -1642,6 +1676,7 @@ case "$cmd" in
     case "$sub" in
       set-login) spoof_admin set-login "$@" ;;
       add-user)  spoof_admin add-user "$@" ;;
+      check)     spoof_check_cli "$@" ;;
       *) usage ;;
     esac ;;
   web)

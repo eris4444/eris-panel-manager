@@ -3,6 +3,23 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-10-19
+
+### Added
+- **"Does spoofing work on this server?" check, right in the Spoof Tester tab.** If your IPs never
+  pass, this tells you why. Two levels:
+  - **Check this server** (instant, no SSH) — can this server open a raw socket and craft
+    spoofed-source packets at all? Rules out containers/VPSes where raw sockets are blocked.
+  - **Full check** (needs SSH to your other server) — sends a short spoofed ICMP burst and, via
+    `tcpdump` on the other server, reports **PASS/FAIL**: whether the spoofed packets actually
+    arrived. A FAIL means your provider most likely blocks spoofing (egress filtering), so Spoof
+    Tunnel won't work from that server — no IP list will ever pass.
+- New CLI `erispm spoof check --target IP --ssh-host H [...]` (prints a machine-readable `RESULT:`
+  line) and web endpoint `POST /api/spoof-check`.
+
+### Upgrade
+`erispm update` (or re-run `install.sh`).
+
 ## [1.5.1] — 2026-10-19
 
 ### Added
@@ -196,6 +213,7 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.6.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.6.0
 [1.5.1]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.5.1
 [1.5.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.5.0
 [1.4.1]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.1

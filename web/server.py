@@ -444,6 +444,25 @@ def port_open(port):
         return False
 
 
+def raw_socket_capable():
+    """Can this host open a raw socket with IP_HDRINCL? (necessary to send spoofed
+    source packets at all). True+msg / False+reason. Not an egress-filter test."""
+    proto = getattr(socket, "IPPROTO_RAW", 255)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_RAW, proto)
+    except PermissionError:
+        return False, "no permission for raw sockets (need root / CAP_NET_RAW)"
+    except OSError as e:
+        return False, "raw sockets are not available here (container/kernel blocks them): %s" % e
+    try:
+        s.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_HDRINCL", 3), 1)
+    except OSError as e:
+        s.close()
+        return False, "IP_HDRINCL not allowed: %s" % e
+    s.close()
+    return True, "raw sockets work — this server can craft spoofed-source packets"
+
+
 def _clamp(v, lo, hi, default):
     try:
         return max(lo, min(hi, int(v)))
@@ -597,6 +616,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._run(body)
         if p == "/api/spoof-admin":
             return self._spoof_admin(body)
+        if p == "/api/spoof-check":
+            return self._spoof_check(body)
         if p in ("/api/input", "/api/signal", "/api/resize"):
             job = find_job(body.get("job"))
             if job is None:
@@ -802,6 +823,40 @@ class Handler(BaseHTTPRequestHandler):
         if r.returncode == 0:
             return self._json(200, {"ok": True, "output": tail})
         return self._json(500, {"ok": False, "error": tail or ("exit " + str(r.returncode))})
+
+    # "does spoofing work on this server?" — an instant local raw-socket capability
+    # test, plus (when SSH to the other server is given) the real egress test.
+    def _spoof_check(self, body):
+        raw_ok, raw_msg = raw_socket_capable()
+        result = {"raw_ok": raw_ok, "raw_msg": raw_msg}
+        tgt = str(body.get("target", "") or "").strip()
+        ssh = body.get("ssh") if isinstance(body.get("ssh"), dict) else {}
+        host = str(ssh.get("host", "") or "").strip()
+        if tgt and host:
+            spf = str(body.get("spoof_ip", "") or "1.1.1.1").strip()
+            if not re.match(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$", spf):
+                spf = "1.1.1.1"
+            user = str(ssh.get("user", "") or "root").strip() or "root"
+            port = str(ssh.get("port", "") or "22").strip() or "22"
+            pw = str(ssh.get("pass", "") or "")
+            if (not re.match(r"^[A-Za-z0-9._-]+$", tgt) or not re.match(r"^[A-Za-z0-9._-]+$", host)
+                    or not re.match(r"^[A-Za-z0-9._@-]+$", user) or not port.isdigit()):
+                result["full"] = {"status": "ERROR", "detail": "invalid target / SSH fields"}
+                return self._json(200, result)
+            argv = erispm_argv() + ["spoof", "check", "--target", tgt, "--spoof-ip", spf,
+                                    "--ssh-host", host, "--ssh-user", user, "--ssh-port", port]
+            env = self._base_env({})
+            if pw:
+                env["ERISPM_SPOOF_SSHPW"] = pw
+                argv += ["--ssh-pass-env", "ERISPM_SPOOF_SSHPW"]
+            try:
+                r = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=60)
+                m = re.search(r"RESULT:\s*(\w+)", (r.stdout or "") + (r.stderr or ""))
+                result["full"] = {"status": m.group(1) if m else "UNKNOWN",
+                                  "detail": ((r.stdout or "") + (r.stderr or "")).strip()[-300:]}
+            except Exception as e:
+                result["full"] = {"status": "ERROR", "detail": str(e)}
+        return self._json(200, result)
 
     def _run(self, body):
         action = body.get("action", "")

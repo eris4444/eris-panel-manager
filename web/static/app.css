@@ -245,6 +245,15 @@ code{font-family:var(--mono);font-size:.82em;background:rgba(255,255,255,.06);pa
 .sp-mini li{padding:.15rem 0;border-bottom:1px dashed var(--line);font-size:.84rem}
 .sp-addrow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 1rem}
 .sp-addrow select{width:auto;min-width:160px;flex:1}
+.sp-capcard{margin-bottom:1.3rem;border-color:var(--line2)}
+.sp-capcard .head-actions .btn{width:auto}
+.sp-capfull{margin-top:.7rem}
+.sp-capfull summary{cursor:pointer;color:var(--cyan);font-size:.86rem;font-weight:600}
+.sp-capfull .form{margin-top:.8rem;max-width:none}
+.sp-cap{font-size:.9rem;line-height:1.5;margin:.7rem 0 0;padding:.6rem .8rem;border-radius:10px}
+.sp-cap.ok{color:var(--green);background:rgba(126,224,162,.1);border:1px solid rgba(126,224,162,.3)}
+.sp-cap.bad{color:var(--red);background:rgba(255,122,133,.1);border:1px solid rgba(255,122,133,.3)}
+.sp-cap.warn{color:var(--yellow);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.3)}
 
 @media(max-width:560px){
   .sp-grid2{grid-template-columns:1fr}

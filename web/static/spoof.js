@@ -525,6 +525,32 @@
         <div class="section-head"><h2>🔬 Spoof Tester</h2></div>
         <p class="hint">Find which spoofed source IPs can reach a destination. Run <b>Receiver</b> on the
           foreign server, then <b>Sender</b> on the Iran side. Passed IPs feed a tunnel's Spoof IP list.</p>
+        <div class="card sp-capcard">
+          <h3>🩺 Does spoofing work on this server?</h3>
+          <p class="hint">If none of your IPs ever pass, test this first. It checks whether this server can make
+            spoofed packets at all — and, with SSH to your <b>other</b> server, whether they actually arrive there.</p>
+          <div class="head-actions">
+            <button class="btn" type="button" data-capquick>Check this server</button>
+          </div>
+          <div id="sp-capres"></div>
+          <details class="sp-capfull">
+            <summary>Full check — does a spoofed packet really arrive? (needs SSH to the other server)</summary>
+            <form class="form" id="sp-capform">
+              <div class="row">
+                <label>Other server IP (target)<input name="target" placeholder="203.0.113.9" required></label>
+                <label>Spoof IP to try<input name="spoof_ip" value="1.1.1.1"></label>
+              </div>
+              <div class="row">
+                <label>SSH host <span class="sp-muted">(blank = same as target)</span><input name="host"></label>
+                <label>SSH user<input name="user" value="root"></label>
+                <label>SSH port<input name="port" value="22"></label>
+              </div>
+              <label>SSH password <span class="sp-muted">(blank = use your key)</span><input name="pass" type="password" autocomplete="off"></label>
+              <p class="err" id="sp-caperr" hidden></p>
+              <button class="btn btn-primary" type="submit">Run full check</button>
+            </form>
+          </details>
+        </div>
         <div class="sp-seg" id="sp-tmode">
           <button data-m="receiver" class="active">📡 Receiver</button>
           <button data-m="sender">📤 Sender</button>
@@ -583,8 +609,56 @@
         file.value = '';
       };
       form.addEventListener('submit', e => { e.preventDefault(); this.startTester(form); });
+      // capability check
+      this.root.querySelector('[data-capquick]').onclick = (ev) => this.runCapCheck(null, ev.target);
+      const cf = this.root.querySelector('#sp-capform');
+      cf.addEventListener('submit', e => { e.preventDefault(); this.runCapCheck(cf, cf.querySelector('button')); });
       this.api('/instances').then(l => { this.tuns = l || []; }).catch(() => {});
       this.pollTester();
+    }
+    async runCapCheck(form, btn) {
+      const box = this.root.querySelector('#sp-capres');
+      const err = this.root.querySelector('#sp-caperr'); if (err) err.hidden = true;
+      let body = {};
+      if (form) {
+        if (!form.target.value.trim()) { err.textContent = 'Enter the other server IP'; err.hidden = false; return; }
+        body = { target: form.target.value.trim(), spoof_ip: form.spoof_ip.value.trim() || '1.1.1.1',
+                 ssh: { host: form.host.value.trim(), user: form.user.value.trim() || 'root', port: form.port.value.trim() || '22', pass: form.pass.value } };
+      }
+      const label = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = form ? 'Checking… (a few seconds)' : 'Checking…'; }
+      box.innerHTML = '<p class="sp-muted">Checking…</p>';
+      try {
+        const d = await this.erisApi('/api/spoof-check', body);
+        box.innerHTML = this.capResultHtml(d, !!form);
+      } catch (ex) {
+        if (ex.message !== 'eris-auth') box.innerHTML = '<p class="err">' + esc(ex.message) + '</p>';
+      }
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+    capResultHtml(d, didFull) {
+      let h = '';
+      h += d.raw_ok
+        ? '<p class="sp-cap ok">✓ ' + esc(d.raw_msg) + '</p>'
+        : '<p class="sp-cap bad">✗ ' + esc(d.raw_msg) + '<br><span class="sp-muted">Spoofing is impossible on this server — a different provider / server is needed.</span></p>';
+      if (d.full) {
+        const s = d.full.status;
+        const map = {
+          PASS: ['ok', '✓ PASS — spoofed packets reached the other server. This server CAN spoof. 🎉'],
+          FAIL: ['bad', '✗ FAIL — the spoofed packets did NOT arrive. Your provider most likely blocks spoofing (egress filtering), so Spoof Tunnel will not work from this server.'],
+          NO_TCPDUMP: ['warn', 'Could not verify — tcpdump is not installed on the other server. Install it there (apt/dnf/apk install tcpdump) and retry.'],
+          NOSSH: ['warn', 'Could not SSH to the other server — check the SSH host / user / port / password.'],
+          UNKNOWN: ['warn', 'Could not read a clear result — try again.'],
+          ERROR: ['warn', 'Check failed: ' + (d.full.detail || '')],
+        };
+        const [cls, msg] = map[s] || ['warn', s + (d.full.detail ? ' — ' + d.full.detail : '')];
+        h += '<p class="sp-cap ' + cls + '">' + esc(msg) + '</p>';
+      } else if (didFull) {
+        h += '<p class="sp-muted">(no full result)</p>';
+      } else if (d.raw_ok) {
+        h += '<p class="sp-muted">Raw sockets work, but that alone does not prove your provider lets spoofed packets leave. Use the full check (needs SSH to your other server) for the real answer.</p>';
+      }
+      return h;
     }
     async startTester(form) {
       const err = this.root.querySelector('#sp-terr'); err.hidden = true;

@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.5.1-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.6.0-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.5.1
+   ███████╗██║  ██║██║███████║   v1.6.0
 
   Installed on this server
   ──────────────────────────────────────────
@@ -260,11 +260,15 @@ erispm spoof set-login --user newadmin --pass 'new-password'   # replace the log
 erispm spoof add-user  --user teammate --pass 'their-password' # add another login
 ```
 
-There is also a quick, temporary **spoof‑capability check** in the Tunnels menu for a fast sanity
-test before you commit to a tunnel setup. Give it SSH access to your other server and it runs
-`tcpdump` there, sends a short spoofed ICMP burst from this side, and reports **PASS/FAIL** on its
-own — whether the spoofed packets really arrived (so you learn if your provider allows spoofing, and
-which source IPs work). Without SSH it falls back to a manual "watch `tcpdump` yourself" flow.
+**Does spoofing even work on this server?** If your Tester IPs never pass, check this first — it is
+right in the web panel's **Spoof Tester** tab ("Does spoofing work on this server?"):
+- *Check this server* (instant) — can this server open a raw socket and craft spoofed packets at all?
+- *Full check* (give it SSH to your other server) — it runs `tcpdump` there, sends a short spoofed
+  ICMP burst, and reports **PASS/FAIL**: whether the spoofed packets really arrived. A **FAIL** means
+  your provider blocks spoofing (egress filtering), so Spoof Tunnel can't work from that server.
+
+The same check is in the `erispm` menu (Tunnels → Quick spoof‑capability check), which also has a
+manual "watch `tcpdump` yourself" fallback when you don't want to give SSH.
 
 ---
 
