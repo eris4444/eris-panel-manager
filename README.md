@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.5.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.1-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.5.0
+   ███████╗██║  ██║██║███████║   v1.5.1
 
   Installed on this server
   ──────────────────────────────────────────
@@ -147,6 +147,7 @@ erispm cert sync <domain>        # re-apply after a renewal
 erispm cert list
 erispm migrate --to root@NEW_IP --port 22 --panels ALL --dry-run
 erispm tunnel install <spoof|eris-tunnel-2>
+erispm spoof set-login --user U --pass P        # reset the Spoof panel login (add-user to add one)
 erispm web <install|start|stop|restart|status|url|passwd>
 erispm status [--json]
 erispm update
@@ -249,6 +250,15 @@ into a tunnel. The original panel is still one click away ("Original panel ↗")
 
 Running the installer again would give the Spoof backend a **new port and another login**, so
 `erispm tunnel install spoof` leaves an existing one untouched (`--force` reinstalls anyway).
+
+The Spoof panel's **login** can be changed from the Settings tab (or the CLI): set a new username +
+password, or add a second login. The Spoof backend has no such API, so erispm does it on the panel's
+own database as root and the `spoof-panel` binary makes the password hash (so it stays compatible):
+
+```bash
+erispm spoof set-login --user newadmin --pass 'new-password'   # replace the login
+erispm spoof add-user  --user teammate --pass 'their-password' # add another login
+```
 
 There is also a quick, temporary **spoof‑capability check** in the Tunnels menu for a fast sanity
 test before you commit to a tunnel setup. Give it SSH access to your other server and it runs

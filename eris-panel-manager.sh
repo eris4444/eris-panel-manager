@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.5.0"
+SCRIPT_VER="1.5.1"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -983,6 +983,50 @@ tunnel_install() { # tunnel_install <spoof|spoof-tester|eris-tunnel-2>
   esac
 }
 
+# ------------------------------------------------------------------------------
+#  Spoof panel login admin (the official panel has no username-change / add-user
+#  API, so erispm edits its SQLite DB as root; the spoof-panel binary makes the
+#  bcrypt hash via its own -setup-user so it stays byte-compatible with the login)
+# ------------------------------------------------------------------------------
+SPOOF_PANEL_BIN="/usr/local/bin/spoof-panel"
+_spoof_data_dir() {
+  local d; d="$(grep -m1 -oE 'SPOOF_DATA_DIR=[^ ]+' "$SPOOF_UNIT" 2>/dev/null | cut -d= -f2)"
+  printf '%s' "${d:-/etc/spoof-panel}"
+}
+_spoof_port_of() {
+  local p; p="$(grep -m1 -oE '\-port[=[:space:]]+[0-9]+' "$SPOOF_UNIT" 2>/dev/null | grep -oE '[0-9]+' | head -n1)"
+  if [ -z "$p" ] && have sqlite3; then
+    p="$(sqlite3 "$(_spoof_data_dir)/panel.db" "SELECT value FROM settings WHERE key='panel_port' LIMIT 1;" 2>/dev/null)"
+  fi
+  printf '%s' "$p"
+}
+spoof_admin() { # spoof_admin <set-login|add-user> --user U (--pass-env VAR | --pass P)
+  need_root
+  local op="$1"; shift
+  local user penv pass
+  user="$(getflag --user "$@")"
+  penv="$(getflag --pass-env "$@")"
+  if [ -n "$penv" ]; then pass="$(printenv "$penv" 2>/dev/null)"; else pass="$(getflag --pass "$@")"; fi
+  [ -x "$SPOOF_PANEL_BIN" ] || die "spoof-panel is not installed (install Spoof Tunnel first)"
+  case "$user" in ''|*[!A-Za-z0-9._-]*) die "invalid username - use letters, digits, dot, underscore, dash";; esac
+  [ -n "$pass" ] || die "a password is required"
+  local dir port; dir="$(_spoof_data_dir)"; port="$(_spoof_port_of)"; [ -n "$port" ] || port=8080
+  if [ "$op" = "set-login" ]; then
+    ensure_pkg sqlite3
+    local db="$dir/panel.db"
+    [ -f "$db" ] || die "spoof panel database not found: $db"
+    step "Replacing the Spoof panel login with '$user'"
+    sqlite3 "$db" "PRAGMA busy_timeout=4000; DELETE FROM users;" 2>/dev/null || warn "could not clear the old user(s)"
+  else
+    step "Adding Spoof panel user '$user'"
+  fi
+  if SPOOF_DATA_DIR="$dir" "$SPOOF_PANEL_BIN" -setup-user "$user" -setup-pass "$pass" -setup-port "$port" >/dev/null 2>&1; then
+    ok "done - sign in to the Spoof panel with '$user' and the new password"
+  else
+    die "spoof-panel setup failed (is the panel installed correctly?)"
+  fi
+}
+
 _install_eristun2_headless() {
   local raw="https://raw.githubusercontent.com/eris4444/eris-tunnel-2/main/eris-tunnel-2.sh"
   local dest="/usr/local/bin/eristun2" base="/etc/eris-tunnel-2" tmp ver
@@ -1522,6 +1566,7 @@ ${BOLD}Eris Panel Manager${N}  v$SCRIPT_VER
   ${C}erispm cert${N} sync <domain>      (re-apply after a renewal)   ${C}erispm cert list${N}
   ${C}erispm migrate${N} --to user@host [--port 22] [--password-env VAR] --panels a,b,c|ALL [--dry-run]
   ${C}erispm tunnel install${N} <spoof|eris-tunnel-2>
+  ${C}erispm spoof${N} <set-login|add-user> --user U --pass P   (or --pass-env VAR)
   ${C}erispm web${N} <install|update|start|stop|restart|status|url|passwd>
   ${C}erispm status${N}                   human status    ${C}erispm status --json${N}   machine status
   ${C}erispm update${N}                   self-update
@@ -1592,6 +1637,13 @@ case "$cmd" in
   tunnel)
     sub="${1:-}"; shift || true
     case "$sub" in install) tunnel_install "${1:?spoof|eris-tunnel-2}" ;; *) usage ;; esac ;;
+  spoof)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      set-login) spoof_admin set-login "$@" ;;
+      add-user)  spoof_admin add-user "$@" ;;
+      *) usage ;;
+    esac ;;
   web)
     sub="${1:-status}"; shift || true
     case "$sub" in

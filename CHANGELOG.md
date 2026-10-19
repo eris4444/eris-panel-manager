@@ -3,6 +3,26 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-10-19
+
+### Added
+- **Reset / add the Spoof panel login from the Eris panel.** The Spoof backend has no
+  username-change or add-user API, so the Settings tab now has a "Reset / add login" card: set a new
+  **username and password** (no current password needed — handy if you forgot it), or tick a box to
+  **add a second login** instead of replacing. erispm does it as root on the Spoof panel's own
+  database, and the password hash is made by the `spoof-panel` binary itself so it stays
+  byte-compatible with the panel's login. New CLI: `erispm spoof set-login|add-user --user U --pass P`
+  (or `--pass-env VAR`); new web endpoint `POST /api/spoof-admin` (password passed via the
+  environment, never on the command line). After a replace you're signed out to sign back in with the
+  new login.
+
+### Fixed
+- Removed an invalid `pattern` attribute on the new-login form that threw a regex error in some
+  browsers; the username is validated on the server instead.
+
+### Upgrade
+`erispm update` (or re-run `install.sh`).
+
 ## [1.5.0] — 2026-10-19
 
 ### Added
@@ -176,6 +196,7 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.5.1]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.5.1
 [1.5.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.5.0
 [1.4.1]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.1
 [1.4.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.0

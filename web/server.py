@@ -595,6 +595,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(415, {"error": "expected application/json"})
         if p == "/api/run":
             return self._run(body)
+        if p == "/api/spoof-admin":
+            return self._spoof_admin(body)
         if p in ("/api/input", "/api/signal", "/api/resize"):
             job = find_job(body.get("job"))
             if job is None:
@@ -776,6 +778,30 @@ class Handler(BaseHTTPRequestHandler):
                               extra=[("Cache-Control", "no-store")])
         except Exception as e:
             return self._json(500, {"error": str(e)})
+
+    # change the Spoof panel login, or add a user, via `erispm spoof ...` (root);
+    # the password goes through the environment, never on the argv / in a log.
+    def _spoof_admin(self, body):
+        op = str(body.get("op", ""))
+        user = str(body.get("user", ""))
+        pw = body.get("pass", "")
+        if op not in ("set-login", "add-user"):
+            return self._json(400, {"error": "unknown operation"})
+        if not re.match(r"^[A-Za-z0-9._-]{1,64}$", user):
+            return self._json(400, {"error": "invalid username (letters, digits, dot, underscore, dash)"})
+        if not isinstance(pw, str) or not (1 <= len(pw) <= 256):
+            return self._json(400, {"error": "password must be 1-256 characters"})
+        env = self._base_env({"ERISPM_SPOOF_PW": pw})
+        try:
+            r = subprocess.run(
+                erispm_argv() + ["spoof", op, "--user", user, "--pass-env", "ERISPM_SPOOF_PW"],
+                capture_output=True, text=True, env=env, timeout=60)
+        except Exception as e:
+            return self._json(500, {"ok": False, "error": str(e)})
+        tail = ((r.stdout or "") + (r.stderr or "")).strip()[-800:]
+        if r.returncode == 0:
+            return self._json(200, {"ok": True, "output": tail})
+        return self._json(500, {"ok": False, "error": tail or ("exit " + str(r.returncode))})
 
     def _run(self, body):
         action = body.get("action", "")

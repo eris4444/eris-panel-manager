@@ -67,6 +67,14 @@
       return p + '//' + location.host + this.base + '/api' + path +
         (path.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(this.token);
     }
+    // a call to the ERIS panel itself (not the Spoof backend) — uses the Eris cookie
+    async erisApi(path, body) {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.status === 401) { location.href = '/login'; throw new Error('eris-auth'); }
+      let d = null; try { d = await r.json(); } catch (_) {}
+      if (!r.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+      return d;
+    }
 
     /* ---------------- lifecycle ---------------- */
     async mount() {
@@ -745,6 +753,18 @@
               <button class="btn btn-primary" type="submit">Change password</button>
             </form>
           </div>
+          <div class="card"><h3>Reset / add login <span class="sp-muted">(no current password needed)</span></h3>
+            <p class="hint">Set a new username <b>and</b> password for the Spoof panel, done by erispm as root
+              (handy if you forgot the password). Tick the box to add a second login instead of replacing.</p>
+            <form class="form" id="sp-setform">
+              <label>New username <span class="sp-muted">(letters, digits, . _ -)</span><input name="user" autocomplete="off" required></label>
+              <label>New password<input name="pass" type="password" autocomplete="new-password" required minlength="4"></label>
+              <label>Confirm password<input name="pass2" type="password" autocomplete="new-password" required></label>
+              <label class="check"><input type="checkbox" name="add"> Add as an extra user (keep the current login)</label>
+              <p class="err" id="sp-seterr" hidden></p>
+              <button class="btn btn-primary" type="submit">Apply</button>
+            </form>
+          </div>
           <div class="card"><h3>About</h3>
             <p class="hint">An Eris-designed interface over the official
               <a href="https://github.com/ParsaKSH/spoof-tunnel" target="_blank" rel="noopener noreferrer">ParsaKSH/spoof-tunnel</a>
@@ -753,6 +773,22 @@
           </div>
         </div>`;
       this.bindHeader();
+      const setf = this.root.querySelector('#sp-setform'), serr = this.root.querySelector('#sp-seterr');
+      setf.addEventListener('submit', async e => {
+        e.preventDefault(); serr.hidden = true;
+        if (setf.pass.value !== setf.pass2.value) { serr.textContent = 'Passwords do not match'; serr.hidden = false; return; }
+        const add = setf.add.checked;
+        if (!add && !confirm('Replace the Spoof panel login with "' + setf.user.value + '"? The old login stops working.')) return;
+        const btn = setf.querySelector('button'); btn.disabled = true; btn.textContent = 'Applying…';
+        try {
+          await this.erisApi('/api/spoof-admin', { op: add ? 'add-user' : 'set-login', user: setf.user.value, pass: setf.pass.value });
+          if (add) { this.toast('User "' + setf.user.value + '" added', 'ok'); setf.reset(); }
+          else { this.token = ''; try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} this.closeWS(); this.view = 'tunnels'; this.renderLogin('Login updated — sign in with the new username and password.'); return; }
+        } catch (ex) {
+          if (ex.message !== 'eris-auth') { serr.textContent = ex.message; serr.hidden = false; }
+        }
+        btn.disabled = false; btn.textContent = 'Apply';
+      });
       const f = this.root.querySelector('#sp-pwform'), err = this.root.querySelector('#sp-pwerr');
       f.addEventListener('submit', async e => {
         e.preventDefault(); err.hidden = true;

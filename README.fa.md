@@ -10,7 +10,7 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 [🇬🇧 English](README.md)
 
-![version](https://img.shields.io/badge/version-1.5.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.1-5fd7ff?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
 
 <img src="docs/web-install.jpg" alt="Eris Panel Manager" width="85%">
@@ -183,6 +183,15 @@ IPهای قبول‌شده رو مستقیم بریزه توی یک تانل. پ
 
 نصاب اسپوف هر بار که اجرا بشه **پورت جدید و یک لاگین تازه** می‌سازه؛ برای همین `erispm tunnel install spoof`
 پنلی که از قبل نصبه رو دست نمی‌زنه (برای نصب دوباره: `--force`).
+
+**لاگین پنل اسپوف** رو می‌تونی از تب Settings (یا از CLI) عوض کنی: یوزرنیم و پسورد جدید بذاری، یا یک لاگین دوم
+اضافه کنی. API رسمی اسپوف این رو نداره، برای همین erispm این کار رو با دسترسی root روی دیتابیس خود پنل انجام می‌ده و
+هش پسورد رو خود باینری `spoof-panel` می‌سازه (تا سازگار بمونه):
+
+```bash
+erispm spoof set-login --user newadmin --pass 'new-password'   # جایگزینی لاگین
+erispm spoof add-user  --user teammate --pass 'their-password' # افزودن یک لاگین
+```
 
 یک **تست سریع قابلیت اسپوف** هم توی منوی Tunnels هست. اگه بهش دسترسی SSH سرور مقابلت رو بدی، خودش روی اون
 سرور `tcpdump` می‌گیره، از این طرف یک برست ICMP جعلی می‌فرسته و خودش **PASS/FAIL** می‌گه که پکت‌های جعلی واقعاً
