@@ -3,6 +3,16 @@
 All notable changes to Eris Panel Manager are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] — 2026-10-19
+
+### Changed
+- **The spoof-capability quick check now tells you PASS/FAIL by itself.** Give it SSH access to the
+  target server and it runs `tcpdump` there, sends the temporary spoofed ICMP burst from this side,
+  and reports whether the spoofed packets actually arrived — no more watching `tcpdump` by hand.
+  It also says the likely reason on a FAIL (provider egress filtering, or that source IP filtered on
+  the path), warns if `tcpdump` isn't installed on the target, and notes that the local ping showing
+  100% loss is normal. Without SSH it still falls back to the manual "watch tcpdump yourself" flow.
+
 ## [1.4.0] — 2026-10-19
 
 ### Added
@@ -138,6 +148,7 @@ Initial public release.
 - **Terminal menu** — full-screen coloured TUI sharing the same backend as the web panel.
 - **Self-update** — `erispm update` refreshes the manager and web assets.
 
+[1.4.1]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.1
 [1.4.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.4.0
 [1.3.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.3.0
 [1.2.0]: https://github.com/eris4444/eris-panel-manager/releases/tag/v1.2.0

@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.4.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.4.1-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.4.0
+   ███████╗██║  ██║██║███████║   v1.4.1
 
   Installed on this server
   ──────────────────────────────────────────
@@ -247,8 +247,11 @@ The original panel is still one click away ("Original panel ↗"), and its direc
 Running the installer again would give the Spoof backend a **new port and another login**, so
 `erispm tunnel install spoof` leaves an existing one untouched (`--force` reinstalls anyway).
 
-There is also a quick, temporary spoof‑capability check (`iptables` SNAT + `tcpdump`) in the
-Tunnels menu for a fast sanity test before you commit to a tunnel setup.
+There is also a quick, temporary **spoof‑capability check** in the Tunnels menu for a fast sanity
+test before you commit to a tunnel setup. Give it SSH access to your other server and it runs
+`tcpdump` there, sends a short spoofed ICMP burst from this side, and reports **PASS/FAIL** on its
+own — whether the spoofed packets really arrived (so you learn if your provider allows spoofing, and
+which source IPs work). Without SSH it falls back to a manual "watch `tcpdump` yourself" flow.
 
 ---
 

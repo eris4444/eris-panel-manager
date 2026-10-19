@@ -10,7 +10,7 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 [🇬🇧 English](README.md)
 
-![version](https://img.shields.io/badge/version-1.4.0-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.4.1-5fd7ff?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
 
 <img src="docs/web-install.jpg" alt="Eris Panel Manager" width="85%">
@@ -181,6 +181,11 @@ ERISPM_SSH_PASS='…' erispm migrate --to root@203.0.113.9 --port 2222 \
 
 نصاب اسپوف هر بار که اجرا بشه **پورت جدید و یک لاگین تازه** می‌سازه؛ برای همین `erispm tunnel install spoof`
 پنلی که از قبل نصبه رو دست نمی‌زنه (برای نصب دوباره: `--force`).
+
+یک **تست سریع قابلیت اسپوف** هم توی منوی Tunnels هست. اگه بهش دسترسی SSH سرور مقابلت رو بدی، خودش روی اون
+سرور `tcpdump` می‌گیره، از این طرف یک برست ICMP جعلی می‌فرسته و خودش **PASS/FAIL** می‌گه که پکت‌های جعلی واقعاً
+رسیدن یا نه (یعنی می‌فهمی provider اجازهٔ اسپوف می‌ده و کدوم IPها کار می‌کنن). بدون SSH هم حالت دستی
+(«خودت `tcpdump` رو ببین») کار می‌کنه.
 
 ---
 

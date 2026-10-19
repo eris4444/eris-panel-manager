@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.4.0"
+SCRIPT_VER="1.4.1"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------
@@ -1002,21 +1002,77 @@ _install_eristun2_headless() {
   info "it is an interactive manager - open it from an SSH terminal with:  eristun2"
 }
 
-# Quick local check: can this host emit spoofed source packets? (safe, temporary)
+# Quick check: can this host emit spoofed-source packets to your other server?
+# Safe and temporary (one SNAT rule + a short ICMP burst, both removed right away).
+# With SSH to the target it runs tcpdump THERE and reports PASS/FAIL automatically;
+# without SSH it falls back to the manual "watch tcpdump yourself" hint.
+_spoof_send_burst() { # _spoof_send_burst target spoof_ip count
+  iptables -t nat -A POSTROUTING -d "$1" -j SNAT --to-source "$2"
+  ping -c"${3:-6}" -i 0.5 -W2 "$1" >/dev/null 2>&1 || true
+  iptables -t nat -D POSTROUTING -d "$1" -j SNAT --to-source "$2" 2>/dev/null || true
+}
+
 spoof_quickcheck() {
   need_root
-  ensure_pkg iptables tcpdump
+  ensure_pkg iptables
   step "Spoof capability quick check"
   info "for a full, accurate test use: erispm tunnel install spoof  (then the built-in Spoof Tester)"
   local tgt spf
-  tgt="$(ask 'target IP (your other server)')"
-  spf="$(ask 'spoof source IP to try')"
-  [ -n "$tgt" ] && [ -n "$spf" ] || { warn "need both IPs"; return 1; }
-  info "adding a temporary SNAT rule and sending 3 pings; watch 'tcpdump icmp' on $tgt"
-  iptables -t nat -A POSTROUTING -d "$tgt" -j SNAT --to-source "$spf"
-  ping -c3 -W2 "$tgt" >/dev/null 2>&1 || true
-  iptables -t nat -D POSTROUTING -d "$tgt" -j SNAT --to-source "$spf" 2>/dev/null || true
-  ok "done - if $tgt's tcpdump showed packets from $spf, this side can spoof"
+  tgt="$(ask 'target IP / host (your other server)')"
+  spf="$(ask 'spoof source IP to try' '1.1.1.1')"
+  [ -n "$tgt" ] && [ -n "$spf" ] || { warn "need both the target and a spoof source IP"; return 1; }
+
+  local auto="" host port user pass
+  if confirm "Auto-check the result over SSH on the target (runs tcpdump there)?" y; then
+    host="$(ask 'SSH host of the target' "$tgt")"
+    user="$(ask 'SSH user' 'root')"
+    port="$(ask 'SSH port' '22')"
+    pass="$(ask_secret 'SSH password (blank = use your key)')"
+    info "checking SSH to $user@$host:$port"
+    if _ssh "$host" "$port" "$user" "$pass" "echo ok" 2>/dev/null | grep -q ok; then
+      auto=1
+    else
+      warn "could not SSH to $host - falling back to the manual check"
+    fi
+  fi
+
+  if [ -n "$auto" ]; then
+    local capout cappid out
+    capout="$(mktemp)"
+    info "capturing on $host and sending a spoofed ICMP burst from here (source $spf -> $tgt)"
+    # count ICMP packets arriving at the target with our spoofed source (bounded)
+    _ssh "$host" "$port" "$user" "$pass" \
+      "if command -v tcpdump >/dev/null 2>&1; then timeout 12 tcpdump -ni any -c 10 'icmp and src host $spf' 2>/dev/null | wc -l; else echo NO_TCPDUMP; fi" \
+      >"$capout" 2>/dev/null &
+    cappid=$!
+    sleep 4                                   # let the SSH connect and tcpdump start first
+    _spoof_send_burst "$tgt" "$spf" 6
+    wait "$cappid" 2>/dev/null || true
+    # keep only digits / A-Z / underscore -> a bare number, or NO_TCPDUMP, or empty
+    out="$(tail -n1 "$capout" 2>/dev/null | tr -cd '0-9A-Z_')"; rm -f "$capout"
+    if [ "$out" = "NO_TCPDUMP" ]; then
+      warn "tcpdump is not installed on $host - install it there (apt/dnf/apk install tcpdump) and retry"
+    elif [ -n "$out" ] && [ "$out" -gt 0 ] 2>/dev/null; then
+      ok "PASS - $host received $out packet(s) from $spf"
+      info "this server CAN spoof $spf toward $tgt - put $spf in this side Spoof IP list (direction: here -> $tgt)"
+    elif [ -n "$out" ]; then
+      bad "FAIL - $host received no packets from $spf"
+      info "your provider likely blocks spoofed sources (egress filtering), or $spf is filtered on the path"
+      info "try other source IPs; when none arrive, this server cannot spoof"
+    else
+      warn "could not read the capture result from $host (SSH or tcpdump issue) - try the manual check"
+    fi
+  else
+    ensure_pkg tcpdump
+    info "on $tgt run:   tcpdump -ni any icmp and src host $spf"
+    info "then come back here and press Enter to send the spoofed burst"
+    [ "$NONINT" = "1" ] || { printf '  %s»%s ready? press Enter ' "$C" "$N"; read -r _ </dev/tty || true; }
+    info "sending a temporary spoofed ICMP burst (source $spf -> $tgt)"
+    _spoof_send_burst "$tgt" "$spf" 5
+    ok "done - when tcpdump on $tgt showed packets from $spf, this side can spoof"
+    info "note: the local ping shows ~100% loss - that is normal (replies go to $spf, not here)"
+  fi
+  info "this tests ONE direction and ONE IP; the Spoof Tester checks many IPs per direction"
 }
 
 # ==============================================================================
@@ -1384,7 +1440,7 @@ menu_tunnels() {
     local k; k="$(_pick 'Tunnels' \
       "spoof:Spoof Tunnel  (+ Spoof Tester + web GUI)" \
       "eris-tunnel-2:Eris Tunnel 2  (Backhaul manager)" \
-      "quickcheck:Quick spoof-capability check (temporary)")"
+      "quickcheck:Quick spoof-capability check (auto tcpdump over SSH)")"
     [ -z "$k" ] && return
     case "$k" in
       spoof)         tunnel_install spoof ;;
