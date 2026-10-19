@@ -309,7 +309,7 @@ function renderStatus(items){
   });
   bindRunButtons(grid);
   $$('[data-open-spoof]', grid).forEach(b => b.onclick = () => {
-    if (spoof && spoof.ready) showTab('spoof');
+    if (spoof && spoof.ready) openSpoofFresh();
     else { showConsole(true); T.note('! the Spoof panel\'s port / web path could not be read yet'); }
   });
   $$('[data-del]', grid).forEach(b => b.onclick = () => {
@@ -429,7 +429,9 @@ function showTab(name){
   if (name === 'backups') refreshBackups();
   if (name === 'spoof') spoofUI.mount();
 }
-$('#spoof-open').onclick = () => showTab('spoof');
+// from the dashboard / Tunnels card: a fresh entry lands on the Tunnels sub-view
+function openSpoofFresh(){ spoofUI.openFresh(); showTab('spoof'); }
+$('#spoof-open').onclick = openSpoofFresh;
 $('#tabs').addEventListener('click', e => {
   const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab);
 });

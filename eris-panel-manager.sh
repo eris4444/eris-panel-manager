@@ -24,7 +24,7 @@ set -u
 : "${HOME:=/root}"
 export HOME
 
-SCRIPT_VER="1.4.1"
+SCRIPT_VER="1.5.0"
 MARKER="ERIS-PANEL-MANAGER-SCRIPT"
 
 # --- paths --------------------------------------------------------------------

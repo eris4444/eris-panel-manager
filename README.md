@@ -10,7 +10,7 @@ all from a colourful terminal menu **or** a sleek web panel.
 
 [🇮🇷 فارسی](README.fa.md)
 
-![version](https://img.shields.io/badge/version-1.4.1-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.0-5fd7ff?style=flat-square)
 ![bash](https://img.shields.io/badge/bash-5.x-114?style=flat-square&logo=gnubash&logoColor=white)
 ![web](https://img.shields.io/badge/web%20panel-python3%20stdlib-b48bff?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
@@ -79,7 +79,7 @@ Works on Debian/Ubuntu, RHEL/Alma/Rocky, Alpine and Arch. Requires `root`.
    ██╔════╝██╔══██╗██║██╔════╝   panels · nodes · certs
    █████╗  ██████╔╝██║███████╗   backup · migrate · tunnels
    ██╔══╝  ██╔══██╗██║╚════██║
-   ███████╗██║  ██║██║███████║   v1.4.1
+   ███████╗██║  ██║██║███████║   v1.5.0
 
   Installed on this server
   ──────────────────────────────────────────
@@ -241,8 +241,11 @@ and settings. The UI talks to the official backend's REST API through a same‑o
 tunnel core and its API stay upstream and unchanged, it is reachable on the erispm port and over
 erispm's HTTPS, and only after you sign in to erispm.
 
-You sign in once with the username/password the Spoof installer printed (kept in your browser only).
-The original panel is still one click away ("Original panel ↗"), and its direct address keeps working.
+You sign in once with the username/password the Spoof installer printed (kept in your browser only) —
+or, on a brand-new install with no admin yet, create one right there. A **Guide** tab explains the
+whole flow in the panel, a **New-tunnel wizard** sets each server up as the Iran or Foreign side with
+the right fields and mirrored transports, and the **Spoof Tester** can drop its passing IPs straight
+into a tunnel. The original panel is still one click away ("Original panel ↗"), direct address and all.
 
 Running the installer again would give the Spoof backend a **new port and another login**, so
 `erispm tunnel install spoof` leaves an existing one untouched (`--force` reinstalls anyway).

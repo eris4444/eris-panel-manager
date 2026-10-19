@@ -10,7 +10,7 @@ PasarGuard · Marzban · Marzneshin · 3x‑ui (سنایی) — به‌همرا�
 
 [🇬🇧 English](README.md)
 
-![version](https://img.shields.io/badge/version-1.4.1-5fd7ff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.0-5fd7ff?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-7ee0a2?style=flat-square)
 
 <img src="docs/web-install.jpg" alt="Eris Panel Manager" width="85%">
@@ -176,8 +176,10 @@ ERISPM_SSH_PASS='…' erispm migrate --to root@203.0.113.9 --port 2222 \
 (receiver / sender، با کپی و دانلود IPهای قبول‌شده) و تنظیمات. این رابط با API رسمی بک‌اند از طریق یک
 ریورس‌پراکسی هم‌مبدأ حرف می‌زنه (erispm پورت و مسیر رو از `spoof-panel.service` و تنظیمات پنل می‌خونه)؛ پس
 هستهٔ تانل و APIش دست‌نخورده و بالادست می‌مونه، روی همون پورت و HTTPS خود erispm در دسترسه و فقط بعد از لاگین
-به erispm. یوزر و پسوردی که نصاب اسپوف چاپ کرد رو یک‌بار وارد می‌کنی (فقط توی مرورگرت می‌مونه). پنل اصلی هم
-با یک کلیک («Original panel ↗») توی تب جدید باز می‌شه و آدرس مستقیمش هم کار می‌کنه.
+به erispm. یوزر و پسوردی که نصاب اسپوف چاپ کرد رو یک‌بار وارد می‌کنی (فقط توی مرورگرت می‌مونه) — یا اگه نصب تازه‌ست و
+هنوز ادمین نداره، همون‌جا ادمین می‌سازی. یک تب **Guide** کل روند رو داخل پنل توضیح می‌ده، یک **ویزارد New tunnel**
+هر سرور رو به‌عنوان سمت ایران یا خارج با فیلدهای درست و ترنسپورت‌های آینه تنظیم می‌کنه، و **Spoof Tester** می‌تونه
+IPهای قبول‌شده رو مستقیم بریزه توی یک تانل. پنل اصلی هم با یک کلیک («Original panel ↗») باز می‌شه و آدرس مستقیمش کار می‌کنه.
 
 نصاب اسپوف هر بار که اجرا بشه **پورت جدید و یک لاگین تازه** می‌سازه؛ برای همین `erispm tunnel install spoof`
 پنلی که از قبل نصبه رو دست نمی‌زنه (برای نصب دوباره: `--force`).

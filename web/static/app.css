@@ -220,9 +220,36 @@ code{font-family:var(--mono);font-size:.82em;background:rgba(255,255,255,.06);pa
 .sp-toast.show{opacity:1}
 .sp-toast.ok{border-color:rgba(126,224,162,.5)} .sp-toast.err{border-color:rgba(255,122,133,.5);color:var(--red)}
 
+.sp-banner{
+  background:rgba(95,215,255,.08);border:1px solid rgba(95,215,255,.28);border-radius:12px;
+  padding:.7rem 1rem;font-size:.86rem;color:var(--txt);margin-bottom:1.1rem;line-height:1.5;
+}
+.sp-mirror{font-size:.76rem;color:var(--cyan);font-family:var(--mono);margin:.1rem 0 .2rem}
+.sp-pick{text-align:left;cursor:pointer;border:1px solid var(--line2);font:inherit;color:var(--txt)}
+.sp-pick:hover{border-color:var(--cyan);transform:translateY(-3px)}
+.sp-pick h3{display:flex;align-items:center;gap:.5rem}
+.sp-pick p{margin:.5rem 0 0}
+.sp-cmd{
+  display:flex;align-items:center;gap:.5rem;margin:.4rem 0 1rem;background:#0a0d13;
+  border:1px solid var(--line2);border-radius:10px;padding:.55rem .7rem;
+}
+.sp-cmd code{flex:1;min-width:0;background:none;padding:0;color:var(--cyan);font-size:.8rem;overflow:auto;white-space:nowrap}
+/* buttons inside these cards sit in a row, not full-width like the card's primary button */
+.sp-cmd .btn,.sp-addrow .btn,.sp-doc .btn,.card .head-actions .btn{width:auto;flex:none}
+.sp-doc h3{color:var(--cyan);margin-top:1.1rem;font-size:.98rem}
+.sp-doc h3:first-child{margin-top:0}
+.sp-doc p{font-size:.88rem;line-height:1.6;color:var(--txt);margin:.3rem 0}
+.sp-doc ul,.sp-doc ol{margin:.3rem 0 .3rem;padding-left:1.2rem;font-size:.88rem;line-height:1.7;color:var(--txt)}
+.sp-doc code{font-size:.82em}
+.sp-mini{list-style:none;padding-left:0}
+.sp-mini li{padding:.15rem 0;border-bottom:1px dashed var(--line);font-size:.84rem}
+.sp-addrow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 1rem}
+.sp-addrow select{width:auto;min-width:160px;flex:1}
+
 @media(max-width:560px){
   .sp-grid2{grid-template-columns:1fr}
   .sp-tun-actions .btn span{display:none}
+  .sp-cmd code{white-space:normal;word-break:break-all}
 }
 
 /* ---- table ---- */
